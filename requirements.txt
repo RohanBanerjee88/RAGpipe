@@ -1,0 +1,7 @@
+transformers==4.30.2
+torch==2.2.0
+sentence-transformers==2.2.2
+huggingface_hub==0.16.4
+beautifulsoup4==4.12.3
+requests==2.31.0
+numpy==1.26.4
