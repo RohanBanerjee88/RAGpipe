@@ -1,5 +1,7 @@
 .env
 *.json
 
-
-__pycache__
+.venv-codex/
+venv/
+__pycache__/
+faq_embeddings.pt

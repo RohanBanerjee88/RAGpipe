@@ -248,7 +248,7 @@ Response:"""
 User Question: {user_query}
 
 Available FAQs:
-{json.dumps(questions[:20], indent=2)}
+{json.dumps(questions, indent=2)}
 
 Which FAQ questions are most relevant to answering the user's question?
 Return the indices of the top {keep_top} most relevant FAQs.

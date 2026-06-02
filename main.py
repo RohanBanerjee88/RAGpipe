@@ -191,6 +191,8 @@ class SmartFAQAssistant:
         Returns:
             Generated answer string
         """
+        context_faqs = self._normalize_context_faqs(context_faqs)
+
         # Build appropriate prompt
         if confidence == "high":
             prompt = build_high_confidence_prompt(user_query, context_faqs[0])
@@ -227,6 +229,34 @@ class SmartFAQAssistant:
             
             # Fallback to formatted direct response
             return format_response(context_faqs[0])
+
+    def _normalize_context_faqs(self, context_faqs):
+        """
+        Convert tree-search FAQ records into the retriever match schema used by
+        prompt builders and response formatters.
+        """
+        normalized = []
+
+        for faq in context_faqs:
+            if "matched_question" in faq and "matched_answer" in faq:
+                normalized.append(faq)
+                continue
+
+            normalized.append({
+                "raw_score": float(faq.get("raw_score", 0.0)),
+                "normalized_score": float(faq.get("normalized_score", 0.0)),
+                "bi_score": float(faq.get("bi_score", 0.0)),
+                "score_gap": float(faq.get("score_gap", 0.0)),
+                "confidence": faq.get("confidence", "low"),
+                "needs_llama": faq.get("needs_llama", True),
+                "matched_question": faq.get("question", ""),
+                "matched_answer": faq.get("answer", ""),
+                "url": faq.get("url", "N/A"),
+                "category": faq.get("category", "General"),
+                "hash": faq.get("hash", "N/A")
+            })
+
+        return normalized
     
     def _generate_no_match_response(self):
         """Generate response when no matches found"""

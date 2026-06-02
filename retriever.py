@@ -7,6 +7,7 @@ from sentence_transformers import SentenceTransformer, CrossEncoder, util
 import json
 import torch
 import os
+import re
 from config import (
     FAQ_JSON_PATH,
     BI_ENCODER_MODEL,
@@ -187,6 +188,13 @@ class FAQRetriever:
         }
         if gap_good:
             signals_passed += 1
+
+        # Relative signals alone are not enough evidence for a match. When both
+        # absolute quality signals fail, the "best" candidate may simply be the
+        # least bad item in the shortlist.
+        absolute_match_plausible = bi_good or raw_score >= CROSS_ENCODER_RAW_THRESHOLDS["poor"]
+        if not absolute_match_plausible:
+            return "very_low", True, signal_details
         
         # Determine confidence level based on signals passed
         if signals_passed >= ENSEMBLE_RULES["high"]:
@@ -226,6 +234,25 @@ class FAQRetriever:
             return "low", True
         else:
             return "very_low", True
+
+    def _lexical_rerank_boost(self, user_query, faq):
+        """
+        Add a small reranking boost for exact technical token matches.
+        Confidence still uses raw model scores; this only breaks cases where the
+        cross-encoder prefers generic phrasing over a specific acronym/error.
+        """
+        query_tokens = set(re.findall(r"[A-Za-z0-9_]+", user_query))
+        faq_text = f"{faq.get('question', '')} {faq.get('category', '')}"
+        faq_tokens = set(re.findall(r"[A-Za-z0-9_]+", faq_text))
+
+        shared = query_tokens & faq_tokens
+        boost = 0.15 * len({token.lower() for token in shared if len(token) >= 3})
+
+        for token in shared:
+            if len(token) >= 2 and token.upper() == token and any(char.isalpha() for char in token):
+                boost += 2.0
+
+        return boost
 
     def find_top_k_faqs(self, user_query, k=None, return_all_candidates=False):
         """
@@ -282,53 +309,56 @@ class FAQRetriever:
             min_cross = min(cross_scores)
             print(f"  📊 Cross-encoder range: [{min_cross:.4f}, {max_cross:.4f}]")
 
-        # Normalize cross-encoder scores
+        # ====================================================================
+        # STEP 3: Re-rank by cross-encoder, then score confidence
+        # ====================================================================
         normalized_scores = self._normalize_scores(cross_scores)
-        
-        # Calculate score gap (between top and second candidate)
-        score_gap = 0.0
-        if len(normalized_scores) > 1:
-            score_gap = normalized_scores[0] - normalized_scores[1]
-        
-        # Get max bi-encoder score for ensemble
-        max_bi_score = max([s[0] for s in top_bi_candidates])
+        reranked_candidates = []
 
-        # ====================================================================
-        # STEP 3: Ensemble confidence scoring with multiple signals
-        # ====================================================================
-        results = []
-        for idx, (bi_score_tuple, raw_score, normalized_score, faq) in enumerate(zip(
+        for (bi_score, _, faq), raw_score, normalized_score in zip(
             top_bi_candidates,
-            cross_scores, 
-            normalized_scores, 
-            [faq for _, _, faq in top_bi_candidates]
-        )):
-            bi_score = bi_score_tuple[0]  # Extract bi-encoder score
-            
-            # Calculate gap for this specific result (gap from this to next)
-            current_gap = 0.0
-            if idx < len(normalized_scores) - 1:
-                current_gap = normalized_score - normalized_scores[idx + 1]
-            
-            # Use ensemble scoring for the top result, legacy for others
-            if idx == 0:
-                # Top result: Use full ensemble scoring
-                confidence_level, needs_llama, signal_details = self._get_confidence_level_ensemble(
-                    bi_score=bi_score,
-                    raw_score=raw_score,
-                    normalized_score=normalized_score,
-                    score_gap=score_gap
-                )
-            else:
-                # Other results: Use legacy scoring (simpler)
-                confidence_level, needs_llama = self._get_confidence_level(normalized_score)
-                signal_details = None
-            
-            result = {
+            cross_scores,
+            normalized_scores
+        ):
+            rerank_boost = self._lexical_rerank_boost(user_query, faq)
+            reranked_candidates.append({
+                "faq": faq,
+                "bi_score": float(bi_score),
                 "raw_score": float(raw_score),
                 "normalized_score": float(normalized_score),
-                "bi_score": float(bi_score),
-                "score_gap": float(score_gap) if idx == 0 else float(current_gap),
+                "rerank_score": float(raw_score) + rerank_boost,
+                "rerank_boost": rerank_boost
+            })
+
+        reranked_candidates.sort(key=lambda item: item["rerank_score"], reverse=True)
+
+        # ====================================================================
+        # STEP 4: Ensemble confidence scoring with multiple signals
+        # ====================================================================
+        results = []
+        for idx, candidate in enumerate(reranked_candidates):
+            next_normalized_score = (
+                reranked_candidates[idx + 1]["normalized_score"]
+                if idx < len(reranked_candidates) - 1
+                else candidate["normalized_score"]
+            )
+            score_gap = max(0.0, candidate["normalized_score"] - next_normalized_score)
+
+            confidence_level, needs_llama, signal_details = self._get_confidence_level_ensemble(
+                bi_score=candidate["bi_score"],
+                raw_score=candidate["raw_score"],
+                normalized_score=candidate["normalized_score"],
+                score_gap=score_gap
+            )
+
+            faq = candidate["faq"]
+            result = {
+                "raw_score": candidate["raw_score"],
+                "rerank_score": candidate["rerank_score"],
+                "rerank_boost": candidate["rerank_boost"],
+                "normalized_score": candidate["normalized_score"],
+                "bi_score": candidate["bi_score"],
+                "score_gap": float(score_gap),
                 "confidence": confidence_level,
                 "needs_llama": needs_llama,
                 "matched_question": faq["question"],
@@ -338,14 +368,9 @@ class FAQRetriever:
                 "hash": faq.get("hash", "N/A")
             }
             
-            # Add signal details for top result (useful for debugging)
-            if signal_details:
-                result["ensemble_signals"] = signal_details
+            result["ensemble_signals"] = signal_details
             
             results.append(result)
-
-        # Sort by normalized score
-        results.sort(key=lambda x: x["normalized_score"], reverse=True)
         
         # Debug output for ensemble signals (top result only)
         if self.debug and results and "ensemble_signals" in results[0]:
@@ -363,13 +388,12 @@ class FAQRetriever:
         if return_all_candidates:
             return results
         
-        # Import CONFIDENCE_THRESHOLDS for filtering
-        from config import CONFIDENCE_THRESHOLDS
-        
-        # Filter by threshold
+        # Filter only on calibrated ensemble confidence. Normalized scores are
+        # relative within the candidate set and can make irrelevant queries look
+        # artificially strong.
         filtered_results = [
             r for r in results 
-            if r["normalized_score"] >= CONFIDENCE_THRESHOLDS["low"]
+            if r["confidence"] != "very_low"
         ]
 
         # If no results pass threshold, return top-k with very_low confidence
