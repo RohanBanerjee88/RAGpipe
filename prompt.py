@@ -3,7 +3,9 @@
 Smart LLaMA handler with persistent loading and confidence-aware prompts
 """
 
-from transformers import pipeline
+import os
+
+from transformers import AutoConfig, pipeline
 import torch
 from retriever import FAQRetriever
 from config import (
@@ -25,6 +27,25 @@ from config import (
 
 _llama_pipeline = None
 _llama_load_attempted = False
+_llama_task = None
+
+
+def _get_model_name():
+    """Return the configured LLM model, allowing local test overrides."""
+    return os.getenv("FAQ_LLM_MODEL", LLAMA_MODEL)
+
+
+def _get_pipeline_task(model_name):
+    """Pick the correct generation pipeline for causal vs seq2seq models."""
+    task_override = os.getenv("FAQ_LLM_TASK")
+    if task_override:
+        return task_override
+
+    config = AutoConfig.from_pretrained(model_name)
+    if getattr(config, "is_encoder_decoder", False):
+        return "text2text-generation"
+
+    return "text-generation"
 
 
 def get_llama_pipeline():
@@ -35,7 +56,7 @@ def get_llama_pipeline():
     Returns:
         HuggingFace text-generation pipeline
     """
-    global _llama_pipeline, _llama_load_attempted
+    global _llama_pipeline, _llama_load_attempted, _llama_task
     
     if _llama_pipeline is not None:
         return _llama_pipeline
@@ -48,22 +69,29 @@ def get_llama_pipeline():
     
     try:
         print("\n" + "="*60)
-        print("🔄 Loading LLaMA model (one-time, ~20-30 seconds)...")
+        model_name = _get_model_name()
+        _llama_task = _get_pipeline_task(model_name)
+
+        print(f"🔄 Loading LLM model: {model_name}")
+        print(f"🧰 Pipeline task: {_llama_task}")
         print("⏳ Please wait...")
         print("="*60 + "\n")
         
-        device_map = "auto" if USE_GPU else "cpu"
-        torch_dtype = torch.float16 if (USE_GPU and torch.cuda.is_available()) else torch.float32
-        
-        _llama_pipeline = pipeline(
-            "text-generation",
-            model=LLAMA_MODEL,
-            device_map=device_map,
-            torch_dtype=torch_dtype
-        )
+        pipeline_kwargs = {
+            "task": _llama_task,
+            "model": model_name,
+        }
+
+        if USE_GPU and torch.cuda.is_available():
+            pipeline_kwargs["device_map"] = "auto"
+            pipeline_kwargs["torch_dtype"] = torch.float16
+        else:
+            pipeline_kwargs["device"] = -1
+
+        _llama_pipeline = pipeline(**pipeline_kwargs)
         
         print("\n" + "="*60)
-        print("✅ LLaMA model loaded successfully!")
+        print("✅ LLM model loaded successfully!")
         print("🚀 Subsequent queries will be faster")
         print("="*60 + "\n")
         
@@ -80,11 +108,12 @@ def unload_llama():
     """
     Unload LLaMA from memory (useful for freeing GPU/RAM)
     """
-    global _llama_pipeline, _llama_load_attempted
+    global _llama_pipeline, _llama_load_attempted, _llama_task
     
     if _llama_pipeline is not None:
         del _llama_pipeline
         _llama_pipeline = None
+        _llama_task = None
         _llama_load_attempted = False
         
         if torch.cuda.is_available():
@@ -96,6 +125,11 @@ def unload_llama():
 def is_llama_loaded():
     """Check if LLaMA is currently loaded"""
     return _llama_pipeline is not None
+
+
+def get_llama_task():
+    """Return the active generation task, if the model is loaded."""
+    return _llama_task
 
 
 # ============================================================================
@@ -242,19 +276,29 @@ def generate_llama_response(prompt, confidence_level="medium"):
         if DEBUG_MODE:
             print(f"\n🤖 Generating response (confidence: {confidence_level})...")
         
-        output = llm(
-            prompt,
-            max_new_tokens=LLAMA_MAX_NEW_TOKENS,
-            temperature=temperature,
-            top_p=LLAMA_TOP_P,
-            do_sample=LLAMA_DO_SAMPLE,
-            pad_token_id=llm.tokenizer.eos_token_id
-        )
+        generation_kwargs = {
+            "max_new_tokens": LLAMA_MAX_NEW_TOKENS,
+            "temperature": temperature,
+            "top_p": LLAMA_TOP_P,
+            "do_sample": LLAMA_DO_SAMPLE,
+        }
+
+        if get_llama_task() == "text2text-generation":
+            generation_kwargs["do_sample"] = False
+            generation_kwargs.pop("temperature", None)
+            generation_kwargs.pop("top_p", None)
+
+        if getattr(llm, "tokenizer", None) is not None and llm.tokenizer.eos_token_id is not None:
+            generation_kwargs["pad_token_id"] = llm.tokenizer.eos_token_id
+
+        output = llm(prompt, **generation_kwargs)
         
         generated_text = output[0]["generated_text"]
         
         # Extract answer part (remove prompt)
-        if "Answer:" in generated_text:
+        if get_llama_task() == "text2text-generation":
+            answer = generated_text.strip()
+        elif "Answer:" in generated_text:
             answer = generated_text.split("Answer:")[-1].strip()
         else:
             # Fallback: get everything after the prompt

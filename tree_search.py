@@ -5,6 +5,7 @@ Implements reasoning-based navigation through hierarchical FAQ tree
 """
 
 import json
+import re
 from typing import List, Dict, Any, Optional
 from prompt import get_llama_pipeline, generate_llama_response
 
@@ -167,12 +168,13 @@ Response:"""
                 if self.debug and "thinking" in result:
                     print(f"  LLM reasoning: {result['thinking']}")
                 
-                return node_ids
+                if node_ids:
+                    return node_ids
         except Exception as e:
             if self.debug:
                 print(f"  Error parsing LLM response: {e}")
         
-        return []
+        return self._fallback_top_level_search(user_query)
     
     def _search_subnodes(self, user_query: str, subnodes: List[Dict], parent_title: str) -> List[str]:
         """
@@ -221,12 +223,13 @@ Response:"""
             end = response.rfind('}') + 1
             if start != -1 and end > start:
                 result = json.loads(response[start:end])
-                return result.get("node_ids", [])
+                node_ids = result.get("node_ids", [])
+                if node_ids:
+                    return node_ids
         except:
             pass
         
-        # Fallback: return all subnodes
-        return [sn["node_id"] for sn in subnodes]
+        return self._fallback_subnode_search(user_query, subnodes)
     
     def _filter_faqs(self, user_query: str, faqs: List[Dict], keep_top=10) -> List[Dict]:
         """
@@ -272,12 +275,97 @@ Response:"""
                 
                 # Return FAQs at those indices
                 filtered = [faqs[i] for i in relevant_indices if i < len(faqs)]
-                return filtered
+                if filtered:
+                    return filtered
         except:
             pass
         
-        # Fallback: return first N
-        return faqs[:keep_top]
+        return self._fallback_filter_faqs(user_query, faqs, keep_top=keep_top)
+
+    def _keyword_score(self, query: str, text: str) -> int:
+        """Score rough lexical/topic overlap for deterministic fallbacks."""
+        query = query.lower()
+        text = text.lower()
+
+        keyword_groups = {
+            "gpu": ["gpu", "cuda"],
+            "oom": ["oom", "out of memory", "memory"],
+            "slurm": ["slurm", "batch", "job", "jobs"],
+            "submit": ["submit", "submission", "job", "jobs"],
+            "module": ["module", "modules", "load"],
+            "python": ["python", "conda", "jupyter"],
+            "storage": ["storage", "scratch", "files", "quota", "drive"],
+            "ticket": ["ticket", "support", "contact"],
+            "login": ["login", "password", "permission", "ssh"],
+            "r": ["rstudio", " r ", "package", "matrix", "ggplot2"],
+        }
+
+        query_tokens = set(re.findall(r"[a-z0-9_]+", query))
+        text_tokens = set(re.findall(r"[a-z0-9_]+", text))
+        score = len(query_tokens & text_tokens)
+
+        for words in keyword_groups.values():
+            if any(word in query for word in words) and any(word in text for word in words):
+                score += 5
+
+        return score
+
+    def _node_search_text(self, node: Dict) -> str:
+        """Build searchable text for a tree node."""
+        parts = [node.get("title", ""), node.get("summary", "")]
+        parts.extend(faq.get("question", "") for faq in node.get("faqs", []))
+
+        for subnode in node.get("subnodes", []):
+            parts.append(subnode.get("title", ""))
+            parts.append(subnode.get("summary", ""))
+            parts.extend(faq.get("question", "") for faq in subnode.get("faqs", []))
+
+        return " ".join(parts)
+
+    def _fallback_top_level_search(self, user_query: str, keep_top=3) -> List[str]:
+        """Fallback category search when the LLM does not return valid JSON."""
+        scored = []
+        for node in self.tree.get("nodes", []):
+            scored.append((self._keyword_score(user_query, self._node_search_text(node)), node["node_id"]))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        node_ids = [node_id for score, node_id in scored if score > 0][:keep_top]
+
+        if self.debug:
+            print(f"  Fallback top-level categories: {node_ids}")
+
+        return node_ids
+
+    def _fallback_subnode_search(self, user_query: str, subnodes: List[Dict], keep_top=2) -> List[str]:
+        """Fallback subnode search when the LLM does not return valid JSON."""
+        scored = []
+        for subnode in subnodes:
+            scored.append((self._keyword_score(user_query, self._node_search_text(subnode)), subnode["node_id"]))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        node_ids = [node_id for score, node_id in scored if score > 0][:keep_top]
+
+        if self.debug:
+            print(f"  Fallback subnodes: {node_ids}")
+
+        return node_ids
+
+    def _fallback_filter_faqs(self, user_query: str, faqs: List[Dict], keep_top=10) -> List[Dict]:
+        """Fallback FAQ filtering when the LLM does not return valid JSON."""
+        scored = [
+            (self._keyword_score(user_query, f"{faq.get('question', '')} {faq.get('answer', '')}"), index, faq)
+            for index, faq in enumerate(faqs)
+        ]
+        scored.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+
+        filtered = [faq for score, _, faq in scored if score > 0][:keep_top]
+        if not filtered:
+            filtered = faqs[:keep_top]
+
+        if self.debug:
+            print(f"  Fallback FAQ filter returned {len(filtered)} FAQs")
+
+        return filtered
     
     def _find_node_by_id(self, node_id: str) -> Optional[Dict]:
         """Find node by ID in tree"""

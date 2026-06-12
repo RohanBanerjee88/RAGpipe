@@ -7,16 +7,76 @@ Builds a PageIndex-style tree structure without manual categorization
 import json
 import hashlib
 from datetime import datetime
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from typing import List, Dict, Any
 from prompt import get_llama_pipeline, generate_llama_response
 
 
 class FAQTreeBuilder:
     """
-    Builds hierarchical tree structure from flat FAQ list
-    Uses LLM to automatically categorize and organize FAQs
+    Builds hierarchical tree structure from flat FAQ list.
+
+    The FAQ scraper already preserves useful documentation section names. The
+    builder keeps those names as subnodes and groups them into deterministic
+    high-level domains, which makes the PageIndex tree stable and testable.
     """
+
+    DOMAIN_GROUPS = OrderedDict([
+        ("Getting Help and Tickets", {
+            "summary": "Support tickets, contact forms, OnDemand tickets, and sharing troubleshooting context.",
+            "categories": {
+                "Submitting a ticket using the contact form",
+                "Submitting a ticket using OnDemand",
+                "What information to include in a ticket",
+                "Getting help",
+            },
+        }),
+        ("Login and Access", {
+            "summary": "HPCC usernames, passwords, SSH access, permission errors, and browser access.",
+            "categories": {
+                "Logging in and accessing theHPCC",
+            },
+        }),
+        ("Usage, Limits, and Environment", {
+            "summary": "Cluster limits, usage checks, node usage, environment variables, and shell basics.",
+            "categories": {
+                "Limits and usage",
+                "Environment variables",
+                "Commonly used environment variables",
+                "Table of contents",
+            },
+        }),
+        ("Storage and Files", {
+            "summary": "Storage quotas, scratch space, data protection, cloud drives, archives, and file transfer.",
+            "categories": {
+                "Storage and files",
+            },
+        }),
+        ("Jobs and Compute", {
+            "summary": "Submitting jobs, GPU jobs, buy-in accounts, SLURM output, OOM, and job errors.",
+            "categories": {
+                "Submitting jobs and running code",
+            },
+        }),
+        ("Software and Modules", {
+            "summary": "Software installation, module load issues, VS Code module setup, powertools, and OnDemand apps.",
+            "categories": {
+                "Software and modules",
+            },
+        }),
+        ("Python and Conda", {
+            "summary": "Python modules, Conda environments, Jupyter, matplotlib, and Python shebangs.",
+            "categories": {
+                "Python and Conda",
+            },
+        }),
+        ("R and RStudio", {
+            "summary": "RStudio Server display issues and R package installation problems.",
+            "categories": {
+                "R and RStudio Server",
+            },
+        }),
+    ])
     
     def __init__(self, faq_json_path="all_faqs.json", tree_output_path="faq_tree.json", debug=False):
         """
@@ -61,6 +121,22 @@ class FAQTreeBuilder:
     def _generate_node_id(self, level, index):
         """Generate unique node ID"""
         return f"{level:04d}_{index:04d}"
+
+    def _domain_for_category(self, category_name: str) -> str:
+        """Map a scraped FAQ category to a stable top-level domain."""
+        for domain_name, domain_config in self.DOMAIN_GROUPS.items():
+            if category_name in domain_config["categories"]:
+                return domain_name
+
+        return "Other"
+
+    def _summary_for_category(self, category_name: str, faqs: List[Dict]) -> str:
+        """Create a deterministic summary from category name and sample questions."""
+        sample_questions = [faq.get("question", "") for faq in faqs[:3]]
+        if not sample_questions:
+            return f"Topics related to {category_name}."
+
+        return f"{category_name}: " + "; ".join(sample_questions)
     
     def build_initial_categories(self):
         """
@@ -336,64 +412,79 @@ Response:"""
         
         # Step 1: Load FAQs
         self.load_faqs()
-        
-        # Step 2: Build top-level categories
-        categories = self.build_initial_categories()
+
+        # Step 2: Preserve scraped categories and group into stable domains.
+        categories_by_domain = OrderedDict()
+        for domain_name, domain_config in self.DOMAIN_GROUPS.items():
+            categories_by_domain[domain_name] = {
+                "summary": domain_config["summary"],
+                "categories": OrderedDict()
+            }
+
+        categories_by_domain["Other"] = {
+            "summary": "Miscellaneous documentation topics not covered by another domain.",
+            "categories": OrderedDict()
+        }
+
+        for faq in self.faqs:
+            category_name = faq.get("category", "General")
+            domain_name = self._domain_for_category(category_name)
+            categories_by_domain[domain_name]["categories"].setdefault(category_name, []).append(faq)
+
+        categories_by_domain = OrderedDict(
+            (domain_name, domain_data)
+            for domain_name, domain_data in categories_by_domain.items()
+            if domain_data["categories"]
+        )
         
         # Step 3: Build hierarchical tree
         tree = {
             "metadata": {
                 "created_at": datetime.now().isoformat(),
                 "total_faqs": len(self.faqs),
-                "total_categories": len(categories),
-                "version": "1.0"
+                "total_categories": len(categories_by_domain),
+                "version": "2.0",
+                "builder": "deterministic_category_grouping"
             },
             "nodes": []
         }
         
         node_index = 0
-        for category_name, category_faqs in categories.items():
+        for domain_name, domain_data in categories_by_domain.items():
+            category_groups = domain_data["categories"]
+            domain_faqs = [
+                faq
+                for category_faqs in category_groups.values()
+                for faq in category_faqs
+            ]
+
             if self.debug:
-                print(f"\nProcessing category: {category_name} ({len(category_faqs)} FAQs)")
-            
-            # Generate category summary
-            category_summary = self.generate_summary(category_name, category_faqs)
+                print(f"\nProcessing domain: {domain_name} ({len(domain_faqs)} FAQs)")
             
             # Build category node
             category_node = {
                 "node_id": self._generate_node_id(1, node_index),
-                "title": category_name,
-                "summary": category_summary,
-                "faq_count": len(category_faqs),
+                "title": domain_name,
+                "summary": domain_data["summary"],
+                "faq_count": len(domain_faqs),
                 "faqs": []
             }
-            
-            # Try to build subcategories
-            subcategories = self.build_subcategories(category_name, category_faqs)
-            
-            if subcategories:
-                # Has subcategories
-                subcat_map = self.assign_faqs_to_subcategories(category_faqs, subcategories)
-                
+
+            if len(category_groups) > 1:
                 category_node["subnodes"] = []
-                
-                subnode_index = 0
-                for subcat_name, subcat_faqs in subcat_map.items():
-                    subcat_summary = self.generate_summary(subcat_name, subcat_faqs)
-                    
+
+                for subnode_index, (category_name, category_faqs) in enumerate(category_groups.items()):
                     subnode = {
                         "node_id": self._generate_node_id(2, subnode_index),
-                        "title": subcat_name,
-                        "summary": subcat_summary,
-                        "faq_count": len(subcat_faqs),
-                        "faqs": subcat_faqs
+                        "title": category_name,
+                        "summary": self._summary_for_category(category_name, category_faqs),
+                        "faq_count": len(category_faqs),
+                        "faqs": category_faqs
                     }
-                    
+
                     category_node["subnodes"].append(subnode)
-                    subnode_index += 1
             else:
-                # No subcategories, store FAQs directly
-                category_node["faqs"] = category_faqs
+                category_node["faqs"] = domain_faqs
             
             tree["nodes"].append(category_node)
             node_index += 1
