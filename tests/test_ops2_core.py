@@ -1,14 +1,41 @@
 """Fast deterministic unit tests for OPS2 quality controls."""
 
 import unittest
+import json
+import tempfile
+from pathlib import Path
 
+from config import FAQ_JSON_PATH, PROJECT_ROOT, TREE_JSON_PATH
 from grounding import INSUFFICIENT_EVIDENCE, validate_grounded_answer
 from hybrid_retrieval import BM25Index, lexical_coverage, reciprocal_rank_fusion
-from ingestion import normalize_faq, normalize_text
+from ingestion import normalize_faq, normalize_text, normalize_url
 from source_confidence import combined_source_confidence, trust_score
+from scrape import load_previous_faqs, write_json
+
+
+class FreshCloneTests(unittest.TestCase):
+    def test_generated_paths_are_rooted_in_repository(self):
+        self.assertTrue(Path(FAQ_JSON_PATH).is_absolute())
+        self.assertEqual(Path(FAQ_JSON_PATH).parent, PROJECT_ROOT)
+        self.assertEqual(Path(TREE_JSON_PATH).parent, PROJECT_ROOT)
+
+    def test_missing_corpus_is_a_valid_first_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing_path = Path(directory) / "all_faqs.json"
+            self.assertEqual(load_previous_faqs(missing_path), [])
+
+    def test_json_writer_creates_configured_parent_directories(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_path = Path(directory) / "generated" / "all_faqs.json"
+            write_json(output_path, {"faqs": []})
+            self.assertEqual(json.loads(output_path.read_text()), {"faqs": []})
 
 
 class IngestionTests(unittest.TestCase):
+    def test_url_normalization_does_not_insert_spaces(self):
+        url = "https://docs.icer.msu.edu/Frequently_Asked_Questions_FAQ_/"
+        self.assertEqual(normalize_url(url), url)
+
     def test_normalization_is_idempotent(self):
         raw = "How do I use theHPCCwith runningGPUjobs?"
         normalized = normalize_text(raw)

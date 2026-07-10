@@ -67,7 +67,11 @@ When reviewing the OPS2 pull request before merge:
 ```bash
 git fetch origin
 git switch OPS2
+git branch --show-current
 ```
+
+The final command must print `OPS2`. A normal clone starts on the repository's
+default branch, so this switch is required until the pull request is merged.
 
 Create and activate the environment:
 
@@ -84,6 +88,10 @@ Build the local corpus and deterministic FAQ tree:
 ```bash
 python scrape.py
 ```
+
+Generated paths are resolved from the repository itself, so the bootstrap does
+not depend on the shell's current directory. Running from the repository root is
+still recommended because the remaining commands and examples assume it.
 
 This step is required on a fresh clone. Generated corpus files are intentionally
 not committed because they are refreshable build artifacts. A successful scrape
@@ -124,7 +132,7 @@ Use `stats` to inspect session routing and `quit` to exit cleanly.
 
 The OPS2 reference run produces:
 
-- 13 focused unit tests passing
+- 17 focused unit tests passing, including clean-clone path/bootstrap coverage
 - 31/31 labeled exact, paraphrased, unsupported, and adversarial cases passing
 - 100% route accuracy on the checked evaluation set
 - 100% supported Recall@5 on the checked evaluation set

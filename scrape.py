@@ -10,6 +10,7 @@ import json
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 from ingestion import content_hash, normalize_faq_collection, normalize_text, utc_now_iso
 
@@ -37,8 +38,36 @@ except ImportError:
     SCRAPE_MAX_WORKERS = 5
     MIN_QUESTION_LENGTH = 10
     MIN_ANSWER_LENGTH = 20
-    FAQ_JSON_PATH = "all_faqs.json"
-    SCRAPE_METADATA_PATH = "scrape_metadata.json"
+    PROJECT_ROOT = Path(__file__).resolve().parent
+    FAQ_JSON_PATH = PROJECT_ROOT / "all_faqs.json"
+    SCRAPE_METADATA_PATH = PROJECT_ROOT / "scrape_metadata.json"
+
+
+def load_previous_faqs(path):
+    """Return an empty corpus on a genuine first run or an unreadable cache."""
+    path = Path(path)
+    if not path.exists():
+        return []
+
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            previous_data = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    if isinstance(previous_data, dict):
+        return previous_data.get("faqs", [])
+    if isinstance(previous_data, list):
+        return previous_data
+    return []
+
+
+def write_json(path, payload):
+    """Write JSON below its configured project path, creating parents first."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as file:
+        json.dump(payload, file, indent=2, ensure_ascii=False)
 
 
 def generate_hash(question, answer):
@@ -131,14 +160,7 @@ def main():
     total_duplicates = 0
     scrape_timestamp = utc_now_iso()
 
-    previous_faqs = []
-    if os.path.exists(FAQ_JSON_PATH):
-        try:
-            with open(FAQ_JSON_PATH, "r", encoding="utf-8") as f:
-                previous_data = json.load(f)
-            previous_faqs = previous_data.get("faqs", previous_data if isinstance(previous_data, list) else [])
-        except (OSError, json.JSONDecodeError):
-            previous_faqs = []
+    previous_faqs = load_previous_faqs(FAQ_JSON_PATH)
     
     # Scrape all URLs concurrently
     with ThreadPoolExecutor(max_workers=SCRAPE_MAX_WORKERS) as executor:
@@ -162,6 +184,12 @@ def main():
         scraped_at=scrape_timestamp,
     )
 
+    if not all_faqs:
+        raise RuntimeError(
+            "The scrape returned no FAQs. Existing corpus files were left unchanged. "
+            "Check network access and the configured ICER URLs."
+        )
+
     # Save to JSON
     data = {
         "metadata": {
@@ -174,8 +202,7 @@ def main():
         "faqs": all_faqs
     }
     
-    with open(FAQ_JSON_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    write_json(FAQ_JSON_PATH, data)
     
     print(f"\n{'='*60}")
     print(f"✨ Scraping complete!")
@@ -186,8 +213,7 @@ def main():
     print(f"{'='*60}\n")
     
     # Also save metadata
-    with open(SCRAPE_METADATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(data["metadata"], f, indent=2)
+    write_json(SCRAPE_METADATA_PATH, data["metadata"])
     
     # Show sample
     if all_faqs:
