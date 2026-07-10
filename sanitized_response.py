@@ -22,7 +22,7 @@ def format_high_confidence_response(faq_match):
         Formatted response string
     """
     response = f"""
-✅ **Direct Answer** (High Confidence: {faq_match['normalized_score']:.0%})
+✅ **Direct Answer** (High confidence)
 
 **Q:** {faq_match['matched_question']}
 
@@ -47,7 +47,7 @@ def format_medium_confidence_response(faq_match):
         Formatted response string
     """
     response = f"""
-🔍 **Best Match** (Confidence: {faq_match['normalized_score']:.0%})
+🔍 **Best Match** (Medium confidence)
 
 **Q:** {faq_match['matched_question']}
 
@@ -74,7 +74,7 @@ def format_low_confidence_response(faq_match):
         Formatted response string
     """
     response = f"""
-⚠️  **Uncertain Match** (Confidence: {faq_match['normalized_score']:.0%})
+⚠️  **Uncertain Match** (Low confidence)
 
 **Potentially Related Question:**
 {faq_match['matched_question']}
@@ -107,7 +107,7 @@ def format_very_low_confidence_response(faq_match):
         Formatted response string
     """
     response = f"""
-❌ **No Confident Match Found** (Score: {faq_match['normalized_score']:.0%})
+❌ **No Confident Match Found**
 
 I couldn't find a reliable answer in the ICER documentation for your question.
 
@@ -190,7 +190,7 @@ Please try:
         
         response_parts.append(f"""
 {'-'*60}
-**#{i}** {confidence_emoji} **{match['confidence'].upper()}** (Score: {match['normalized_score']:.0%})
+**#{i}** {confidence_emoji} **{match['confidence'].upper()}**
 
 **Q:** {match['matched_question']}
 

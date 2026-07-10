@@ -8,6 +8,7 @@ import json
 import re
 from typing import List, Dict, Any, Optional
 from prompt import get_llama_pipeline, generate_llama_response
+from ingestion import normalize_faq_collection
 
 
 class TreeSearcher:
@@ -36,6 +37,13 @@ class TreeSearcher:
         
         with open(self.tree_path, 'r', encoding='utf-8') as f:
             self.tree = json.load(f)
+
+        for node in self.tree.get("nodes", []):
+            if node.get("faqs"):
+                node["faqs"] = normalize_faq_collection(node["faqs"])
+            for subnode in node.get("subnodes", []):
+                if subnode.get("faqs"):
+                    subnode["faqs"] = normalize_faq_collection(subnode["faqs"])
         
         if self.debug:
             total_nodes = len(self.tree.get("nodes", []))
@@ -142,7 +150,7 @@ class TreeSearcher:
 User Question: {user_query}
 
 Available categories in the knowledge base:
-{json.dumps(simplified_tree, indent=2)}
+{json.dumps(simplified_tree, separators=(",", ":"))}
 
 Which categories are most likely to contain information relevant to this question?
 Select 1-3 categories that seem most relevant.
@@ -203,7 +211,7 @@ Response:"""
 User Question: {user_query}
 
 Available subcategories:
-{json.dumps(simplified_subnodes, indent=2)}
+{json.dumps(simplified_subnodes, separators=(",", ":"))}
 
 Which subcategories are most likely to contain the answer?
 Select 1-2 most relevant subcategories.
@@ -251,7 +259,7 @@ Response:"""
 User Question: {user_query}
 
 Available FAQs:
-{json.dumps(questions, indent=2)}
+{json.dumps(questions, separators=(",", ":"))}
 
 Which FAQ questions are most relevant to answering the user's question?
 Return the indices of the top {keep_top} most relevant FAQs.

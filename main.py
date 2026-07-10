@@ -7,7 +7,14 @@ Decides between fast direct responses and LLaMA synthesis based on confidence
 from retriever import FAQRetriever
 from sanitized_response import format_response
 from prompt import get_llama_pipeline, is_llama_loaded, generate_llama_response
-from prompt import build_high_confidence_prompt, build_medium_confidence_prompt, build_low_confidence_prompt
+from prompt import build_grounded_prompt
+from grounding import (
+    INSUFFICIENT_EVIDENCE,
+    extractive_grounded_answer,
+    format_sources,
+    validate_grounded_answer,
+)
+from observability import trace_event
 from config import SUPPORT_LINK, ICER_DOCS_BASE, DEBUG_MODE
 import sys
 
@@ -35,6 +42,8 @@ class SmartFAQAssistant:
             "total_queries": 0,
             "direct_responses": 0,
             "llama_responses": 0,
+            "abstained_queries": 0,
+            "grounding_fallbacks": 0,
             "failed_queries": 0
         }
         
@@ -86,6 +95,15 @@ class SmartFAQAssistant:
         result = decision['result']
         confidence = result['confidence']
         route = decision['route']
+
+        trace_event("routing", {
+            "query": user_query,
+            "route": route,
+            "reason": decision.get("reason"),
+            "confidence": confidence,
+            "source_id": result.get("source_id"),
+            "evidence_sufficient": result.get("evidence_sufficient"),
+        })
         
         if self.debug:
             print(f"📊 Confidence: {confidence.upper()}")
@@ -101,9 +119,14 @@ class SmartFAQAssistant:
             
             answer = format_response(result)
             return answer, "direct", confidence
+
+        if route == "abstain":
+            self.stats["abstained_queries"] += 1
+            answer = self._generate_insufficient_evidence_response()
+            return answer, "abstain", confidence
         
         # SLOW PATH: Medium/Low confidence - use tree search + LLaMA
-        else:
+        if route == "llama":
             self.stats["llama_responses"] += 1
             
             if self.debug:
@@ -151,7 +174,10 @@ class SmartFAQAssistant:
                         )
                         
                         if relevant_faqs:
-                            context_faqs = relevant_faqs
+                            context_faqs = self._merge_context_faqs(
+                                decision.get('context_faqs', [result]),
+                                relevant_faqs,
+                            )
                             if self.debug:
                                 print(f"✅ Tree search found {len(context_faqs)} relevant FAQs")
                         else:
@@ -175,9 +201,24 @@ class SmartFAQAssistant:
                     print("ℹ️  Tree search disabled, using top-3 method")
             
             # Generate LLaMA response
-            answer = self._generate_llama_answer(user_query, context_faqs, confidence)
-            
+            answer, generation_status = self._generate_llama_answer(
+                user_query, context_faqs, confidence
+            )
+            if generation_status == "abstain":
+                self.stats["abstained_queries"] += 1
+                return answer, "abstain", confidence
+            if generation_status == "extractive_fallback":
+                self.stats["grounding_fallbacks"] += 1
+
+            trace_event("generation", {
+                "query": user_query,
+                "status": generation_status,
+                "confidence": confidence,
+                "source_ids": [faq.get("source_id") for faq in context_faqs[:5]],
+            })
             return answer, "llama", confidence
+
+        raise RuntimeError(f"Unknown route: {route}")
     
     def _generate_llama_answer(self, user_query, context_faqs, confidence):
         """
@@ -193,13 +234,7 @@ class SmartFAQAssistant:
         """
         context_faqs = self._normalize_context_faqs(context_faqs)
 
-        # Build appropriate prompt
-        if confidence == "high":
-            prompt = build_high_confidence_prompt(user_query, context_faqs[0])
-        elif confidence == "medium":
-            prompt = build_medium_confidence_prompt(user_query, context_faqs)
-        else:  # low or very_low
-            prompt = build_low_confidence_prompt(user_query, context_faqs)
+        prompt, sources = build_grounded_prompt(user_query, context_faqs)
         
         # Generate response
         try:
@@ -207,28 +242,22 @@ class SmartFAQAssistant:
             
             if response is None:
                 raise Exception("LLaMA returned None")
-            
-            # Add source attribution
-            top_result = context_faqs[0]
-            
-            if confidence == "medium":
-                response += f"\n\n---\n📚 **Source:** {top_result['url']}"
-                response += f"\n🏷️ **Category:** {top_result['category']}"
-            elif confidence in ["low", "very_low"]:
-                response += f"\n\n---"
-                response += f"\n📚 **Related Documentation:** {top_result['url']}"
-                response += f"\n🏷️ **Category:** {top_result['category']}"
-                response += f"\n📧 **Need More Help?** {SUPPORT_LINK}"
-                response += f"\n📖 **Browse Docs:** {ICER_DOCS_BASE}"
-            
-            return response
+
+            valid, validation_reason = validate_grounded_answer(response, len(sources))
+            if valid and INSUFFICIENT_EVIDENCE in response:
+                return self._generate_insufficient_evidence_response(), "abstain"
+            if not valid:
+                fallback = extractive_grounded_answer(sources[0], validation_reason)
+                return f"{fallback}\n\n{format_sources(sources[:1])}", "extractive_fallback"
+
+            return f"{response}\n\n{format_sources(sources)}", "generated"
             
         except Exception as e:
             if self.debug:
                 print(f"❌ LLaMA generation failed: {e}")
             
-            # Fallback to formatted direct response
-            return format_response(context_faqs[0])
+            fallback = extractive_grounded_answer(context_faqs[0], "generation_error")
+            return f"{fallback}\n\n{format_sources(context_faqs[:1])}", "extractive_fallback"
 
     def _normalize_context_faqs(self, context_faqs):
         """
@@ -253,10 +282,42 @@ class SmartFAQAssistant:
                 "matched_answer": faq.get("answer", ""),
                 "url": faq.get("url", "N/A"),
                 "category": faq.get("category", "General"),
-                "hash": faq.get("hash", "N/A")
+                "section": faq.get("section", faq.get("category", "General")),
+                "source_id": faq.get("source_id", "N/A"),
+                "scraped_at": faq.get("scraped_at", "N/A"),
+                "version": faq.get("version", 1),
+                "hash": faq.get("content_hash", faq.get("hash", "N/A"))
             })
 
         return normalized
+
+    def _merge_context_faqs(self, primary_faqs, supplemental_faqs, max_faqs=10):
+        """Keep reranked evidence first, then add unique tree-search context."""
+        merged = []
+        seen = set()
+
+        for faq in list(primary_faqs) + list(supplemental_faqs):
+            question = faq.get("matched_question", faq.get("question", ""))
+            key = question.strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(faq)
+            if len(merged) >= max_faqs:
+                break
+
+        return merged
+
+    def _generate_insufficient_evidence_response(self):
+        """Return a safe response without presenting an irrelevant closest match."""
+        return f"""
+I could not find enough evidence in the indexed ICER documentation to answer this reliably.
+
+No answer was generated because an unsupported answer would be less useful than an honest fallback.
+
+Support: {SUPPORT_LINK}
+Documentation: {ICER_DOCS_BASE}
+        """.strip()
     
     def _generate_no_match_response(self):
         """Generate response when no matches found"""

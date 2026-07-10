@@ -27,8 +27,8 @@ QUERY_SUITE = [
     ("Jupyter notebook will not see my conda environment", "Python and Conda"),
     ("How do I copy data from Google Drive?", "Storage and files"),
     ("My scratch files disappeared", "Storage and files"),
-    ("I got permission denied even with the right password", "Logging in and accessing theHPCC"),
-    ("remote host identification has changed ssh error", "Logging in and accessing theHPCC"),
+    ("I got permission denied even with the right password", "Logging in and accessing the HPCC"),
+    ("remote host identification has changed ssh error", "Logging in and accessing the HPCC"),
     ("How do I share files with ICER support?", "Getting help"),
     ("What should I include in a support ticket?", "What information to include in a ticket"),
     ("The RStudio page is just gray", "R and RStudio Server"),
@@ -52,6 +52,7 @@ def main() -> int:
     top_without_ensemble = 0
 
     for query, expected_category in QUERY_SUITE:
+        decision = retriever.get_best_match(query)
         results = retriever.find_top_k_faqs(
             query,
             k=5,
@@ -59,7 +60,7 @@ def main() -> int:
         )
         top = results[0]
         category = top["category"]
-        route = "llama" if top["needs_llama"] else "direct"
+        route = decision["route"]
         ensemble_applied = "ensemble_signals" in top
 
         if expected_category and category != expected_category:
@@ -98,7 +99,8 @@ def main() -> int:
     print(f"Wrong expected categories: {wrong_categories}")
     print(f"Unrelated queries routed direct: {direct_unrelated}")
     print(f"Returned top results without ensemble scoring: {top_without_ensemble}")
-    return 0
+    failures = wrong_categories + direct_unrelated + top_without_ensemble
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
