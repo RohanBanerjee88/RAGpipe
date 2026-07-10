@@ -10,6 +10,7 @@ from datetime import datetime
 from collections import OrderedDict, defaultdict
 from typing import List, Dict, Any
 from prompt import get_llama_pipeline, generate_llama_response
+from ingestion import normalize_faq_collection
 
 
 class FAQTreeBuilder:
@@ -34,7 +35,7 @@ class FAQTreeBuilder:
         ("Login and Access", {
             "summary": "HPCC usernames, passwords, SSH access, permission errors, and browser access.",
             "categories": {
-                "Logging in and accessing theHPCC",
+                "Logging in and accessing the HPCC",
             },
         }),
         ("Usage, Limits, and Environment", {
@@ -107,6 +108,8 @@ class FAQTreeBuilder:
             self.faqs = data["faqs"]
         else:
             self.faqs = data
+
+        self.faqs = normalize_faq_collection(self.faqs)
         
         if self.debug:
             print(f"Loaded {len(self.faqs)} FAQs")

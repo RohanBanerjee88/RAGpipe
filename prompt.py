@@ -8,6 +8,14 @@ import os
 from transformers import AutoConfig, pipeline
 import torch
 from retriever import FAQRetriever
+from grounding import (
+    INSUFFICIENT_EVIDENCE,
+    build_evidence_blocks,
+    extractive_grounded_answer,
+    format_sources,
+    validate_grounded_answer,
+)
+from sanitized_response import format_response
 from config import (
     LLAMA_MODEL,
     LLAMA_MAX_NEW_TOKENS,
@@ -248,6 +256,28 @@ Answer (start with a disclaimer):"""
     return prompt.strip()
 
 
+def build_grounded_prompt(user_query, context_faqs, max_sources=3):
+    """Build a source-constrained prompt with stable citation identifiers."""
+    evidence, sources = build_evidence_blocks(context_faqs, max_sources=max_sources)
+    prompt = f"""You answer questions about ICER using only the evidence below.
+
+User question: {user_query}
+
+Evidence:
+{evidence}
+
+Rules:
+1. Use only facts explicitly stated in the evidence.
+2. Do not use outside knowledge, assumptions, or invented steps.
+3. Put an inline citation like [S1] after every factual claim.
+4. Cite only source IDs that appear above.
+5. If the evidence does not answer the question, output exactly: {INSUFFICIENT_EVIDENCE}
+6. Keep the answer concise and practical.
+
+Answer:"""
+    return prompt.strip(), sources
+
+
 # ============================================================================
 # RESPONSE GENERATION
 # ============================================================================
@@ -287,11 +317,14 @@ def generate_llama_response(prompt, confidence_level="medium"):
             generation_kwargs["do_sample"] = False
             generation_kwargs.pop("temperature", None)
             generation_kwargs.pop("top_p", None)
+            generation_kwargs["max_length"] = generation_kwargs.pop("max_new_tokens")
 
         if getattr(llm, "tokenizer", None) is not None and llm.tokenizer.eos_token_id is not None:
             generation_kwargs["pad_token_id"] = llm.tokenizer.eos_token_id
 
-        output = llm(prompt, **generation_kwargs)
+        # Small local smoke-test models commonly have 512-token context
+        # windows. Production models can accept the same flag harmlessly.
+        output = llm(prompt, truncation=True, **generation_kwargs)
         
         generated_text = output[0]["generated_text"]
         
@@ -312,16 +345,7 @@ def generate_llama_response(prompt, confidence_level="medium"):
 
 
 def get_answer_with_llama(user_query, retriever=None):
-    """
-    Get answer using retriever + LLaMA synthesis
-    
-    Args:
-        user_query: User's question
-        retriever: FAQRetriever instance (will create if None)
-    
-    Returns:
-        Generated answer string
-    """
+    """Get an answer through the same evidence gate used by the main assistant."""
     if retriever is None:
         retriever = FAQRetriever(debug=DEBUG_MODE)
     
@@ -331,68 +355,42 @@ def get_answer_with_llama(user_query, retriever=None):
     # Get routing decision from retriever
     decision = retriever.get_best_match(user_query)
     
-    if not decision['result']:
+    if not decision["result"] or decision["route"] == "abstain":
         return (
-            f"I couldn't find relevant information in the ICER documentation for your question.\n\n"
-            f"Please visit ICER's documentation at {ICER_DOCS_BASE} or submit a support ticket at {SUPPORT_LINK}"
+            "I could not find enough evidence in the indexed ICER documentation "
+            "to answer this reliably.\n\n"
+            f"Documentation: {ICER_DOCS_BASE}\nSupport: {SUPPORT_LINK}"
         )
-    
-    result = decision['result']
-    confidence = result['confidence']
+
+    result = decision["result"]
+    confidence = result["confidence"]
     
     if DEBUG_MODE:
         print(f"📊 Confidence: {confidence}")
         print(f"🎯 Score: {result['normalized_score']:.3f}")
     
-    # Build appropriate prompt based on confidence
-    if confidence == "high":
-        prompt = build_high_confidence_prompt(user_query, result)
-    elif confidence in ["medium", "low"]:
-        context_faqs = decision.get('context_faqs', [result])
-        if confidence == "medium":
-            prompt = build_medium_confidence_prompt(user_query, context_faqs)
-        else:  # low
-            prompt = build_low_confidence_prompt(user_query, context_faqs)
-    else:  # very_low
-        # For very low confidence, add strong disclaimer
-        context_faqs = decision.get('context_faqs', [result])
-        answer = (
-            f"⚠️ **I'm not confident I can answer this accurately.**\n\n"
-            f"Based on potentially related information, here's what I found:\n\n"
-        )
-        
-        # Show the top match
-        answer += f"**Possibly Related:** {result['matched_question']}\n"
-        answer += f"{result['matched_answer'][:300]}...\n\n"
-        answer += f"🔗 Source: {result['url']}\n\n"
-        answer += (
-            f"**Recommendation:** Please consult ICER's official documentation or "
-            f"submit a support ticket for accurate information:\n"
-            f"📧 Support: {SUPPORT_LINK}\n"
-            f"📚 Docs: {ICER_DOCS_BASE}"
-        )
-        return answer
-    
-    # Generate response with LLaMA
+    if decision["route"] == "direct":
+        return format_response(result)
+
+    context_faqs = decision.get("context_faqs", [result])
+    prompt, sources = build_grounded_prompt(user_query, context_faqs)
     response = generate_llama_response(prompt, confidence_level=confidence)
-    
+
     if response is None:
-        # Fallback to direct answer if LLaMA fails
+        response = extractive_grounded_answer(sources[0], "generation_error")
+        return f"{response}\n\n{format_sources(sources[:1])}"
+
+    valid, reason = validate_grounded_answer(response, len(sources))
+    if response.strip() == INSUFFICIENT_EVIDENCE:
         return (
-            f"**Based on ICER documentation:**\n\n"
-            f"Q: {result['matched_question']}\n\n"
-            f"A: {result['matched_answer']}\n\n"
-            f"🔗 Source: {result['url']}\n"
-            f"🏷️ Category: {result['category']}"
+            "I could not find enough evidence in the indexed ICER documentation "
+            "to answer this reliably."
         )
-    
-    # Add source attribution for medium/low confidence
-    if confidence in ["medium", "low"]:
-        response += f"\n\n---\n📚 For more details, visit: {result['url']}"
-        if confidence == "low":
-            response += f"\n📧 Need more help? Submit a ticket: {SUPPORT_LINK}"
-    
-    return response
+    if not valid:
+        response = extractive_grounded_answer(sources[0], reason)
+        return f"{response}\n\n{format_sources(sources[:1])}"
+
+    return f"{response}\n\n{format_sources(sources)}"
 
 
 # ============================================================================

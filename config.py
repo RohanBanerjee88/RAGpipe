@@ -53,6 +53,20 @@ BI_ENCODER_TOP_K = 10
 # Number of final results to return
 FINAL_TOP_K = 3
 
+# Hybrid retrieval: BM25 + semantic ranking fused before cross-encoder scoring
+BM25_TOP_K = 20
+SEMANTIC_TOP_K = 20
+HYBRID_CANDIDATE_K = 20
+RRF_RANK_CONSTANT = 60
+RRF_BM25_WEIGHT = 1.0
+RRF_SEMANTIC_WEIGHT = 1.0
+
+# Final reranking combines normalized intent, keyword, and coverage signals.
+# Absolute cross/semantic scores remain separate inputs to confidence routing.
+FINAL_CROSS_WEIGHT = 1.0
+FINAL_BM25_WEIGHT = 0.35
+FINAL_LEXICAL_WEIGHT = 0.25
+
 # ============================================================================
 # ENSEMBLE CONFIDENCE SCORING (Multi-signal approach)
 # ============================================================================
@@ -99,6 +113,16 @@ CONFIDENCE_THRESHOLDS = {
 }
 CROSS_ENCODER_RAW_THRESHOLD = 0.45
 
+# Minimum evidence required before invoking an LLM. A query can pass through
+# semantic/cross-encoder evidence or strong lexical evidence, but not relative
+# ranking alone.
+EVIDENCE_GATE = {
+    "min_bi_score": 0.40,
+    "min_cross_raw_score": 1.0,
+    "min_bm25_normalized": 0.45,
+    "min_lexical_coverage": 0.34,
+}
+
 # ============================================================================
 # LLAMA CONFIGURATION
 # ============================================================================
@@ -123,12 +147,20 @@ ICER_DOCS_BASE = "https://docs.icer.msu.edu/"
 DEBUG_MODE = False  # Set to True for verbose logging
 ENABLE_CALIBRATION = False  # Set to True to run threshold calibration
 
+# Retrieval tracing is opt-in because user questions may contain sensitive data.
+TRACE_ENABLED = False
+TRACE_PATH = "logs/retrieval_traces.jsonl"
+
+# Small in-process cache for repeated queries. This is intentionally not
+# conversational memory and never changes factual retrieval behavior.
+RETRIEVAL_CACHE_SIZE = 128
+
 # ============================================================================
 # TREE SEARCH CONFIGURATION (PageIndex-style)
 # ============================================================================
 
 TREE_JSON_PATH = "faq_tree.json"
-TREE_SEARCH_ENABLED = True          # Enable/disable tree search for low-confidence queries
+TREE_SEARCH_ENABLED = False         # Optional experiment; hybrid retrieval covers the current 54-FAQ corpus
 TREE_SEARCH_MAX_NODES = 3           # Max categories to search
 TREE_SEARCH_MAX_FAQS = 15           # Max FAQs to return from tree search
 TREE_BUILD_MIN_SUBCATEGORY_SIZE = 5 # Min FAQs required to create subcategory

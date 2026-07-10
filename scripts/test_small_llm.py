@@ -33,9 +33,9 @@ TREE_CASES = [
 ]
 
 SLOW_CASES = [
-    "Can I run a GPU job?",
-    "My SLURM output says OOM. What happened?",
-    "Can you explain quantum gravity?",
+    ("My SLURM output says OOM. What happened?", "llama"),
+    ("I need to share code and files with ICER support", "llama"),
+    ("Can you explain quantum gravity?", "abstain"),
 ]
 
 
@@ -82,9 +82,9 @@ def main() -> int:
     print("\n" + "=" * 100)
     print("FULL ASSISTANT SLOW PATH CHECKS")
     print("=" * 100)
-    for query in SLOW_CASES:
+    for query, expected_route in SLOW_CASES:
         answer, route, confidence = assistant.get_answer(query)
-        passed = route == "llama" and confidence in {"medium", "low", "very_low"}
+        passed = route == expected_route
         if not passed:
             failures.append(f"assistant:{query}")
 

@@ -50,8 +50,8 @@ ROUTING_CASES = [
     {
         "query": "Can I run a GPU job?",
         "kind": "hard",
-        "expected_route": "llama",
-        "expected_confidence": "very_low",
+        "expected_route": "direct",
+        "expected_confidence": "high",
         "expected_question_contains": "GPU",
     },
     {
@@ -64,14 +64,14 @@ ROUTING_CASES = [
     {
         "query": "Why is the weather bad today?",
         "kind": "out_of_domain",
-        "expected_route": "llama",
+        "expected_route": "abstain",
         "expected_confidence": "very_low",
         "expected_question_contains": None,
     },
     {
         "query": "Can you explain quantum gravity?",
         "kind": "out_of_domain",
-        "expected_route": "llama",
+        "expected_route": "abstain",
         "expected_confidence": "very_low",
         "expected_question_contains": None,
     },
@@ -262,7 +262,7 @@ def run_retriever_cases() -> dict:
         if case["expected_question_contains"]:
             match_ok = case["expected_question_contains"].lower() in matched_question.lower()
         else:
-            match_ok = confidence == "very_low" and route != "direct"
+            match_ok = confidence == "very_low" and route == "abstain"
 
         passed = route_ok and confidence_ok and match_ok
         if not passed:

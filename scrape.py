@@ -7,9 +7,11 @@ Based on original scraper with deduplication added
 import requests
 from bs4 import BeautifulSoup
 import json
-import hashlib
+import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+
+from ingestion import content_hash, normalize_faq_collection, normalize_text, utc_now_iso
 
 # Import from config
 try:
@@ -41,11 +43,10 @@ except ImportError:
 
 def generate_hash(question, answer):
     """Generate unique hash for Q&A pair to detect duplicates"""
-    content = f"{question.lower().strip()}{answer.lower().strip()}"
-    return hashlib.md5(content.encode()).hexdigest()
+    return content_hash(question, answer)
 
 
-def extract_faqs_from_url(url, seen_hashes):
+def extract_faqs_from_url(url, seen_hashes, seen_lock):
     """
     Extract FAQs from a single URL with minimal filtering
     Very similar to original scraper
@@ -67,7 +68,7 @@ def extract_faqs_from_url(url, seen_hashes):
     current_section = "General"
 
     for tag in question_tags:
-        question = tag.get_text(strip=True)
+        question = normalize_text(tag.get_text(" ", strip=True))
 
         # Very basic length check only
         if not question or len(question) < MIN_QUESTION_LENGTH:
@@ -83,7 +84,7 @@ def extract_faqs_from_url(url, seen_hashes):
         
         while next_element and next_element.name not in ['h2', 'h3', 'h4']:
             if next_element.name in ['p', 'ul', 'ol', 'div']:
-                text = next_element.get_text(strip=True)
+                text = normalize_text(next_element.get_text(" ", strip=True))
                 if text:
                     answer_parts.append(text)
             next_element = next_element.find_next_sibling()
@@ -95,21 +96,23 @@ def extract_faqs_from_url(url, seen_hashes):
             continue
         
         # Check for duplicates using hash
-        content_hash = generate_hash(question, answer)
-        if content_hash in seen_hashes:
-            duplicates += 1
-            continue
-        
-        seen_hashes.add(content_hash)
+        faq_hash = generate_hash(question, answer)
+        with seen_lock:
+            if faq_hash in seen_hashes:
+                duplicates += 1
+                continue
+
+            seen_hashes.add(faq_hash)
         
         # Add to FAQs
         faqs.append({
             "url": url,
             "category": current_section,
+            "section": current_section,
             "question": question,
             "answer": answer,
-            "hash": content_hash,
-            "scraped_at": datetime.now().isoformat()
+            "hash": faq_hash,
+            "scraped_at": utc_now_iso()
         })
 
     print(f"✅ Scraped {len(faqs)} unique FAQs from {url} (removed {duplicates} duplicates)")
@@ -124,12 +127,23 @@ def main():
     
     all_faqs = []
     seen_hashes = set()
+    seen_lock = threading.Lock()
     total_duplicates = 0
+    scrape_timestamp = utc_now_iso()
+
+    previous_faqs = []
+    if os.path.exists(FAQ_JSON_PATH):
+        try:
+            with open(FAQ_JSON_PATH, "r", encoding="utf-8") as f:
+                previous_data = json.load(f)
+            previous_faqs = previous_data.get("faqs", previous_data if isinstance(previous_data, list) else [])
+        except (OSError, json.JSONDecodeError):
+            previous_faqs = []
     
     # Scrape all URLs concurrently
     with ThreadPoolExecutor(max_workers=SCRAPE_MAX_WORKERS) as executor:
         future_to_url = {
-            executor.submit(extract_faqs_from_url, url, seen_hashes): url 
+            executor.submit(extract_faqs_from_url, url, seen_hashes, seen_lock): url
             for url in SCRAPE_URLS
         }
         
@@ -142,10 +156,17 @@ def main():
             except Exception as exc:
                 print(f"❌ Error scraping {url}: {exc}")
 
+    all_faqs = normalize_faq_collection(
+        all_faqs,
+        previous_faqs=previous_faqs,
+        scraped_at=scrape_timestamp,
+    )
+
     # Save to JSON
     data = {
         "metadata": {
-            "last_scrape": datetime.now().isoformat(),
+            "schema_version": "2.0",
+            "last_scrape": scrape_timestamp,
             "total_faqs": len(all_faqs),
             "urls_scraped": SCRAPE_URLS,
             "duplicates_removed": total_duplicates
@@ -194,14 +215,10 @@ def main():
                 debug=False
             )
             
-            # Check if tree exists
-            if os.path.exists(TREE_JSON_PATH):
-                print("   Using incremental update...")
-                builder.update_tree_incremental(all_faqs)
-            else:
-                print("   Building tree from scratch...")
-                builder.build_tree()
-            
+            # The corpus is small; a deterministic rebuild avoids duplicate or
+            # stale assignments after content/category changes.
+            print("   Rebuilding deterministic tree...")
+            builder.build_tree()
             builder.save_tree()
             print("✅ Tree updated successfully\n")
         else:
