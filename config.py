@@ -3,6 +3,11 @@
 Centralized configuration for ICER FAQ system
 """
 
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+
 # ============================================================================
 # SCRAPING CONFIGURATION
 # ============================================================================
@@ -26,9 +31,9 @@ MIN_ANSWER_LENGTH = 15  # minimum characters for valid answer (was 20)
 # FILE PATHS
 # ============================================================================
 
-FAQ_JSON_PATH = "all_faqs.json"
-EMBEDDING_CACHE_PATH = "faq_embeddings.pt"
-SCRAPE_METADATA_PATH = "scrape_metadata.json"  # for incremental updates
+FAQ_JSON_PATH = PROJECT_ROOT / "all_faqs.json"
+EMBEDDING_CACHE_PATH = PROJECT_ROOT / "faq_embeddings.pt"
+SCRAPE_METADATA_PATH = PROJECT_ROOT / "scrape_metadata.json"  # for incremental updates
 
 # ============================================================================
 # MODEL CONFIGURATION
@@ -149,7 +154,7 @@ ENABLE_CALIBRATION = False  # Set to True to run threshold calibration
 
 # Retrieval tracing is opt-in because user questions may contain sensitive data.
 TRACE_ENABLED = False
-TRACE_PATH = "logs/retrieval_traces.jsonl"
+TRACE_PATH = PROJECT_ROOT / "logs" / "retrieval_traces.jsonl"
 
 # Small in-process cache for repeated queries. This is intentionally not
 # conversational memory and never changes factual retrieval behavior.
@@ -159,7 +164,7 @@ RETRIEVAL_CACHE_SIZE = 128
 # TREE SEARCH CONFIGURATION (PageIndex-style)
 # ============================================================================
 
-TREE_JSON_PATH = "faq_tree.json"
+TREE_JSON_PATH = PROJECT_ROOT / "faq_tree.json"
 TREE_SEARCH_ENABLED = False         # Optional experiment; hybrid retrieval covers the current 54-FAQ corpus
 TREE_SEARCH_MAX_NODES = 3           # Max categories to search
 TREE_SEARCH_MAX_FAQS = 15           # Max FAQs to return from tree search

@@ -56,13 +56,21 @@ def normalize_text(value: object) -> str:
     return text.strip()
 
 
+def normalize_url(value: object) -> str:
+    """Normalize a URL without applying prose punctuation spacing rules."""
+    url = html.unescape(str(value or ""))
+    url = unicodedata.normalize("NFKC", url)
+    url = re.sub(r"[\u200b-\u200d\ufeff\s]+", "", url)
+    return url
+
+
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def stable_source_id(url: str, category: str, question: str) -> str:
     """Build an ID that remains stable when only the answer changes."""
-    identity = "\n".join((normalize_text(url), normalize_text(category), normalize_text(question).lower()))
+    identity = "\n".join((normalize_url(url), normalize_text(category), normalize_text(question).lower()))
     return sha256_text(identity)[:24]
 
 
@@ -80,7 +88,7 @@ def normalize_faq(
     question = normalize_text(raw_faq.get("question"))
     answer = normalize_text(raw_faq.get("answer"))
     category = normalize_text(raw_faq.get("category") or "General")
-    url = normalize_text(raw_faq.get("url"))
+    url = normalize_url(raw_faq.get("url"))
     timestamp = scraped_at or raw_faq.get("scraped_at") or utc_now_iso()
     source_id = raw_faq.get("source_id") or stable_source_id(url, category, question)
     current_hash = content_hash(question, answer)
