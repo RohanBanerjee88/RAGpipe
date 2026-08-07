@@ -59,7 +59,7 @@ class SmartFAQAssistant:
                 self.llama = get_llama_pipeline()
             except Exception as e:
                 print(f"\n⚠️  Could not load LLaMA: {e}")
-                print("Continuing with direct FAQ responses only.\n")
+                print("Continuing without generated responses.\n")
                 return False
         elif is_llama_loaded():
             self.llama = get_llama_pipeline()
@@ -134,11 +134,21 @@ class SmartFAQAssistant:
             
             # Load LLaMA if needed
             if not self._load_llama_if_needed():
-                # Fallback to direct response if LLaMA fails
-                if self.debug:
-                    print("⚠️  Falling back to direct response")
-                answer = format_response(result)
-                return answer, "direct_fallback", confidence
+                if confidence == "medium":
+                    if self.debug:
+                        print("⚠️  Falling back to the supported FAQ match")
+                    answer = format_response(result)
+                    return answer, "direct_fallback", confidence
+
+                # A failed model must not turn a weak candidate into an answer.
+                self.stats["abstained_queries"] += 1
+                trace_event("generation", {
+                    "query": user_query,
+                    "status": "model_load_failed_abstain",
+                    "confidence": confidence,
+                    "source_ids": [result.get("source_id")],
+                })
+                return self._generate_insufficient_evidence_response(), "abstain", confidence
             
             # Use tree search for better context (if enabled)
             from config import TREE_SEARCH_ENABLED, TREE_JSON_PATH

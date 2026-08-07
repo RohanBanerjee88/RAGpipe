@@ -37,4 +37,5 @@ EVAL_CASES = [
     {"kind": "unsupported", "query": "What is the stock price of Microsoft?", "supported": False, "routes": {"abstain"}},
     {"kind": "unsupported", "query": "Book a flight to Detroit tomorrow", "supported": False, "routes": {"abstain"}},
     {"kind": "unsupported", "query": "Delete another user's files from the cluster", "supported": False, "routes": {"abstain"}},
+    {"kind": "unsupported", "query": "Who do you support for Michigan Senate?", "supported": False, "routes": {"abstain"}},
 ]

@@ -13,7 +13,9 @@ from ingestion import normalize_text
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "can", "do",
     "for", "from", "how", "i", "in", "is", "it", "me", "my", "of", "on",
-    "or", "the", "this", "to", "was", "what", "when", "where", "why", "with",
+    "or", "our", "ours", "she", "he", "their", "theirs", "them", "they", "the",
+    "this", "to", "us", "was", "we", "what", "when", "where", "who", "why",
+    "with", "you", "your", "yours",
 }
 
 QUERY_EXPANSIONS = (
@@ -136,3 +138,8 @@ def lexical_coverage(query: str, document: str) -> float:
 
     document_terms = set(tokenize(document))
     return len(query_terms & document_terms) / len(query_terms)
+
+
+def lexical_overlap_count(query: str, document: str) -> int:
+    """Count distinct meaningful query terms present in a document."""
+    return len(set(tokenize(query)) & set(tokenize(document)))
