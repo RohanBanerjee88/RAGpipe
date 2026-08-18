@@ -45,8 +45,9 @@ BI_ENCODER_MODEL = "all-MiniLM-L6-v2"
 # Cross-encoder for re-ranking
 CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
-# LLaMA model for complex queries
-LLAMA_MODEL = "meta-llama/Llama-2-7b-chat-hf"
+# Open, CPU-capable default for rare low-confidence generation requests.
+# Override with FAQ_LLM_MODEL when a larger approved model is available.
+LLAMA_MODEL = "google/flan-t5-base"
 
 # ============================================================================
 # RETRIEVAL CONFIGURATION
@@ -126,6 +127,7 @@ EVIDENCE_GATE = {
     "min_cross_raw_score": 1.0,
     "min_bm25_normalized": 0.45,
     "min_lexical_coverage": 0.34,
+    "min_lexical_overlap_terms": 2,
 }
 
 # ============================================================================

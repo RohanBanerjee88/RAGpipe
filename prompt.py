@@ -317,7 +317,6 @@ def generate_llama_response(prompt, confidence_level="medium"):
             generation_kwargs["do_sample"] = False
             generation_kwargs.pop("temperature", None)
             generation_kwargs.pop("top_p", None)
-            generation_kwargs["max_length"] = generation_kwargs.pop("max_new_tokens")
 
         if getattr(llm, "tokenizer", None) is not None and llm.tokenizer.eos_token_id is not None:
             generation_kwargs["pad_token_id"] = llm.tokenizer.eos_token_id

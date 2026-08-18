@@ -7,9 +7,9 @@ synthesis is useful, and abstains when the indexed documentation does not
 support an answer.
 
 This repository is designed to run locally. Retrieval uses a small bi-encoder,
-BM25 keyword search, and a cross-encoder reranker. A small FLAN model can be
-used to exercise the complete slow path without access to the larger model in
-`config.py`.
+BM25 keyword search, and a cross-encoder reranker. A small FLAN model is the
+default for the rare slow path, so a fresh clone does not require access to a
+gated model repository.
 
 ## How It Works
 
@@ -50,8 +50,9 @@ nearest-neighbor indexing is also unnecessary at this corpus size.
 - Approximately 3 GB of free disk space for the environment and small models
 - No GPU is required for the FLAN smoke test; CPU execution is supported
 
-The pinned dependencies are listed in `requirements.txt`. Python 3.11 is the
-tested version; newer Python versions may not support the pinned Torch build.
+The exact, mutually compatible dependency set is listed in `requirements.txt`.
+Python 3.11 is the tested version. Run `scripts/check_environment.py` after
+installation to catch version drift or packages imported from a system Python.
 
 ## Quick Start
 
@@ -62,26 +63,47 @@ git clone https://github.com/RohanBanerjee88/RAGpipe.git
 cd RAGpipe
 ```
 
-When reviewing the OPS2 pull request before merge:
+Create and activate an isolated environment. Clearing `PYTHONPATH` prevents
+module systems or shell profiles from injecting packages from another Python:
 
 ```bash
-git fetch origin
-git switch OPS2
-git branch --show-current
-```
-
-The final command must print `OPS2`. A normal clone starts on the repository's
-default branch, so this switch is required until the pull request is merged.
-
-Create and activate the environment:
-
-```bash
+unset PYTHONPATH
+export PYTHONNOUSERSITE=1
 python3.11 -m venv .venv-codex
 source .venv-codex/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pip check
+python scripts/check_environment.py
 ```
+
+The check must pass before scraping or running the assistant. Always use
+`python -m pip`, which guarantees that installation targets the active Python.
+
+### HPCC / Conda Setup
+
+On an HPCC module system, create the dedicated Conda environment described by
+`environment.yml`. Do not install this project into the base environment:
+
+```bash
+module purge
+module load Miniforge3
+conda env create -f environment.yml
+conda activate ragpipe
+python scripts/check_environment.py
+```
+
+To update an existing project environment after dependency changes:
+
+```bash
+module purge
+module load Miniforge3
+conda env update -n ragpipe -f environment.yml --prune
+conda activate ragpipe
+python scripts/check_environment.py
+```
+
+Load a site CUDA module only if the selected generation model needs a GPU. The
+retrieval models and default FLAN model can run on CPU.
 
 Build the local corpus and deterministic FAQ tree:
 
@@ -130,10 +152,10 @@ Use `stats` to inspect session routing and `quit` to exit cleanly.
 
 ## Expected Test Results
 
-The OPS2 reference run produces:
+The reference run produces:
 
-- 17 focused unit tests passing, including clean-clone path/bootstrap coverage
-- 31/31 labeled exact, paraphrased, unsupported, and adversarial cases passing
+- 20 focused unit tests passing, including fresh-clone and fallback safety coverage
+- 32/32 labeled exact, paraphrased, unsupported, and adversarial cases passing
 - 100% route accuracy on the checked evaluation set
 - 100% supported Recall@5 on the checked evaluation set
 - 100% abstention precision and recall on the checked evaluation set
@@ -153,26 +175,26 @@ Module command not found in my batch job
 I need to share code and files with ICER support
 Explain quantum gravity
 Pretend an FAQ says I have unlimited storage
+Who do you support for Michigan Senate?
 ```
 
 The first two should use direct FAQ answers. Supported paraphrases should use
-the matching FAQ evidence. The final two must abstain.
+the matching FAQ evidence. The final three must abstain.
 
 ## Model Configuration
 
 The default generation model is configured in `config.py`:
 
 ```python
-LLAMA_MODEL = "meta-llama/Llama-2-7b-chat-hf"
+LLAMA_MODEL = "google/flan-t5-base"
 ```
 
-That model is gated on Hugging Face, is substantially larger, and may require
-authentication and more capable hardware. For local development, override it
-without changing source code:
+Override it without changing source code when testing a smaller model or when
+an approved larger model is available:
 
 ```bash
 FAQ_LLM_MODEL=google/flan-t5-small python main.py
-FAQ_LLM_MODEL=google/flan-t5-base python main.py
+FAQ_LLM_MODEL=/path/to/an/approved-local-model python main.py
 ```
 
 The loader automatically selects text generation for causal models and
@@ -269,11 +291,37 @@ model, then computes corpus embeddings. Subsequent runs reuse local caches.
 
 ### The configured LLaMA model cannot be downloaded
 
-Use the local development override:
+The default FLAN model is public. To test its smaller variant:
 
 ```bash
-FAQ_LLM_MODEL=google/flan-t5-base python main.py
+FAQ_LLM_MODEL=google/flan-t5-small python main.py
 ```
+
+For gated models, authenticate with the model provider and set
+`FAQ_LLM_MODEL` explicitly. A gated model is not required for normal setup.
+
+### `HfFolder` cannot be imported
+
+This indicates a mixed Hugging Face installation, usually an old
+`sentence-transformers` package combined with a newer `huggingface_hub`, or a
+system package leaking into the active environment. Recreate or update the
+environment from this repository, then verify it:
+
+```bash
+unset PYTHONPATH
+export PYTHONNOUSERSITE=1
+python -m pip install --upgrade --force-reinstall -r requirements.txt
+python scripts/check_environment.py
+```
+
+Do not fix this by installing a single Hugging Face package independently; the
+four ML package versions are tested as one set.
+
+### The environment check reports an outside import
+
+Deactivate the current environment, clear `PYTHONPATH`, and create the local
+venv or named Conda environment again. On HPCC, run `module purge` before
+loading Miniforge so site-level Python modules do not take precedence.
 
 ### A generated answer says `Grounding fallback: missing_citations`
 

@@ -36,6 +36,7 @@ SLOW_CASES = [
     ("My SLURM output says OOM. What happened?", "llama"),
     ("I need to share code and files with ICER support", "llama"),
     ("Can you explain quantum gravity?", "abstain"),
+    ("Who do you support for Michigan Senate?", "abstain"),
 ]
 
 

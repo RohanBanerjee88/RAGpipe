@@ -16,6 +16,7 @@ from hybrid_retrieval import (
     BM25Index,
     expand_query,
     lexical_coverage,
+    lexical_overlap_count,
     min_max_normalize,
     reciprocal_rank_fusion,
 )
@@ -325,6 +326,7 @@ class FAQRetriever:
         lexical_evidence = (
             result["bm25_normalized"] >= EVIDENCE_GATE["min_bm25_normalized"]
             and result["lexical_coverage"] >= EVIDENCE_GATE["min_lexical_coverage"]
+            and result["lexical_overlap_count"] >= EVIDENCE_GATE["min_lexical_overlap_terms"]
         )
         return semantic_evidence or cross_evidence or lexical_evidence
 
@@ -443,6 +445,10 @@ class FAQRetriever:
                 lexical_coverage(user_query, self.search_texts[faq_index]),
                 lexical_coverage(retrieval_query, self.search_texts[faq_index]),
             )
+            overlap_count = max(
+                lexical_overlap_count(user_query, self.search_texts[faq_index]),
+                lexical_overlap_count(retrieval_query, self.search_texts[faq_index]),
+            )
             rerank_score = (
                 FINAL_CROSS_WEIGHT * float(normalized_score)
                 + FINAL_BM25_WEIGHT * float(bm25_normalized[faq_index])
@@ -457,6 +463,7 @@ class FAQRetriever:
                 "bm25_normalized": float(bm25_normalized[faq_index]),
                 "rrf_score": float(fused_scores[faq_index]),
                 "lexical_coverage": coverage,
+                "lexical_overlap_count": overlap_count,
                 "raw_score": float(raw_score),
                 "normalized_score": float(normalized_score),
                 "rerank_score": rerank_score,
@@ -493,6 +500,7 @@ class FAQRetriever:
                 "bm25_normalized": candidate["bm25_normalized"],
                 "rrf_score": candidate["rrf_score"],
                 "lexical_coverage": candidate["lexical_coverage"],
+                "lexical_overlap_count": candidate["lexical_overlap_count"],
                 "normalized_score": candidate["normalized_score"],
                 "bi_score": candidate["bi_score"],
                 "score_gap": float(score_gap),
@@ -554,6 +562,7 @@ class FAQRetriever:
                     "cross_raw_score": result["raw_score"],
                     "rerank_score": result["rerank_score"],
                     "lexical_coverage": result["lexical_coverage"],
+                    "lexical_overlap_count": result["lexical_overlap_count"],
                     "confidence": result["confidence"],
                     "evidence_sufficient": result["evidence_sufficient"],
                     "source_confidence": result["source_confidence"],
