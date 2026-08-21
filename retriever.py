@@ -21,6 +21,7 @@ from hybrid_retrieval import (
     reciprocal_rank_fusion,
 )
 from observability import trace_event
+from device_runtime import select_runtime_device
 from source_confidence import (
     combined_source_confidence,
     consistency_score,
@@ -121,13 +122,16 @@ class FAQRetriever:
         if self.debug:
             print(f"🤖 Loading bi-encoder: {BI_ENCODER_MODEL}...")
         
-        device = "cuda" if USE_GPU and torch.cuda.is_available() else "cpu"
-        self.bi_encoder = SentenceTransformer(BI_ENCODER_MODEL, device=device)
+        self.device_selection = select_runtime_device(USE_GPU)
+        self.device = self.device_selection.device
+        if self.debug:
+            print(f"🖥️  Model device: {self.device_selection.summary()}")
+        self.bi_encoder = SentenceTransformer(BI_ENCODER_MODEL, device=self.device)
         
         if self.debug:
             print(f"🤖 Loading cross-encoder: {CROSS_ENCODER_MODEL}...")
         
-        self.cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL)
+        self.cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL, device=self.device)
 
     def _load_embeddings(self):
         """Load or compute question embeddings"""
@@ -135,7 +139,7 @@ class FAQRetriever:
             if self.debug:
                 print(f"⚡ Loading cached embeddings from {EMBEDDING_CACHE_PATH}...")
             
-            cached = torch.load(EMBEDDING_CACHE_PATH)
+            cached = torch.load(EMBEDDING_CACHE_PATH, map_location=self.device)
             if isinstance(cached, dict):
                 self.question_embeddings = cached.get("embeddings")
                 cached_signature = cached.get("signature")
