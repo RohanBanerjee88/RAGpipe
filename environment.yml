@@ -5,7 +5,7 @@ dependencies:
   - python=3.11
   - pip
   - pip:
-      - -r requirements.txt
+      - -r requirements-cuda126.txt
 variables:
   PYTHONNOUSERSITE: "1"
   PYTHONPATH: ""

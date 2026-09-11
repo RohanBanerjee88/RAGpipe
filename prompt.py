@@ -7,6 +7,7 @@ import os
 
 from transformers import AutoConfig, pipeline
 import torch
+from device_runtime import select_runtime_device
 from retriever import FAQRetriever
 from grounding import (
     INSUFFICIENT_EVIDENCE,
@@ -36,6 +37,7 @@ from config import (
 _llama_pipeline = None
 _llama_load_attempted = False
 _llama_task = None
+_llama_device = None
 
 
 def _get_model_name():
@@ -64,7 +66,7 @@ def get_llama_pipeline():
     Returns:
         HuggingFace text-generation pipeline
     """
-    global _llama_pipeline, _llama_load_attempted, _llama_task
+    global _llama_pipeline, _llama_load_attempted, _llama_task, _llama_device
     
     if _llama_pipeline is not None:
         return _llama_pipeline
@@ -90,8 +92,10 @@ def get_llama_pipeline():
             "model": model_name,
         }
 
-        if USE_GPU and torch.cuda.is_available():
-            pipeline_kwargs["device_map"] = "auto"
+        device_selection = select_runtime_device(USE_GPU)
+        _llama_device = device_selection.device
+        if _llama_device == "cuda":
+            pipeline_kwargs["device"] = 0
             pipeline_kwargs["torch_dtype"] = torch.float16
         else:
             pipeline_kwargs["device"] = -1
@@ -109,6 +113,7 @@ def get_llama_pipeline():
         print(f"\n❌ Failed to load LLaMA model: {e}")
         print("💡 Falling back to direct FAQ responses only\n")
         _llama_pipeline = None
+        _llama_device = None
         raise
 
 
@@ -116,7 +121,7 @@ def unload_llama():
     """
     Unload LLaMA from memory (useful for freeing GPU/RAM)
     """
-    global _llama_pipeline, _llama_load_attempted, _llama_task
+    global _llama_pipeline, _llama_load_attempted, _llama_task, _llama_device
     
     if _llama_pipeline is not None:
         del _llama_pipeline
@@ -124,8 +129,9 @@ def unload_llama():
         _llama_task = None
         _llama_load_attempted = False
         
-        if torch.cuda.is_available():
+        if _llama_device == "cuda":
             torch.cuda.empty_cache()
+        _llama_device = None
         
         print("🗑️  LLaMA model unloaded from memory")
 

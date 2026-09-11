@@ -49,10 +49,14 @@ nearest-neighbor indexing is also unnecessary at this corpus size.
 - Internet access for the first dependency, model, and corpus download
 - Approximately 3 GB of free disk space for the environment and small models
 - No GPU is required for the FLAN smoke test; CPU execution is supported
+- HPCC GPU execution requires an NVIDIA driver compatible with CUDA 12.6
 
-The exact, mutually compatible dependency set is listed in `requirements.txt`.
-Python 3.11 is the tested version. Run `scripts/check_environment.py` after
-installation to catch version drift or packages imported from a system Python.
+The common exact dependency set is listed in `requirements-base.txt`.
+`requirements.txt` adds CPU-only PyTorch for a safe local default, while
+`requirements-cuda126.txt` adds the HPCC build that supports the cluster's V100,
+A100, and H100 GPU generations. Python 3.11 is the tested version. Run
+`scripts/check_environment.py` after installation to catch version drift or
+packages imported from a system Python.
 
 ## Quick Start
 
@@ -89,8 +93,24 @@ module purge
 module load Miniforge3
 conda env create -f environment.yml
 conda activate ragpipe
-python scripts/check_environment.py
+python scripts/check_environment.py --profile cuda126
 ```
+
+The Conda environment deliberately installs `torch==2.13.0+cu126`. A bare
+`torch==2.13.0` install on Linux currently resolves to CUDA 13.0, which does not
+include V100/Volta kernels. CUDA 12.6 supports V100, A100, and H100 with one
+environment.
+
+After requesting a GPU node through the cluster scheduler, validate the actual
+allocation before starting the assistant:
+
+```bash
+python scripts/check_gpu.py --require-cuda
+FAQ_DEVICE=cuda FAQ_LLM_MODEL=google/flan-t5-base python main.py
+```
+
+`--require-cuda` makes setup errors fail immediately. Without it, the application
+uses `FAQ_DEVICE=auto` and can fall back to CPU with a warning.
 
 To update an existing project environment after dependency changes:
 
@@ -99,11 +119,15 @@ module purge
 module load Miniforge3
 conda env update -n ragpipe -f environment.yml --prune
 conda activate ragpipe
-python scripts/check_environment.py
+python scripts/check_environment.py --profile cuda126
+python scripts/check_gpu.py --require-cuda
 ```
 
-Load a site CUDA module only if the selected generation model needs a GPU. The
-retrieval models and default FLAN model can run on CPU.
+Do not load a site CUDA toolkit module for the prebuilt PyTorch wheel. The wheel
+contains its CUDA runtime and only needs a compatible NVIDIA driver. Start from
+`module purge`, load Miniforge, and let the GPU preflight report any driver or
+allocation problem. A CUDA module is only needed when compiling PyTorch or a
+custom CUDA extension from source.
 
 Build the local corpus and deterministic FAQ tree:
 
@@ -154,7 +178,7 @@ Use `stats` to inspect session routing and `quit` to exit cleanly.
 
 The reference run produces:
 
-- 20 focused unit tests passing, including fresh-clone and fallback safety coverage
+- 32 focused unit tests passing, including GPU compatibility and fallback coverage
 - 32/32 labeled exact, paraphrased, unsupported, and adversarial cases passing
 - 100% route accuracy on the checked evaluation set
 - 100% supported Recall@5 on the checked evaluation set
@@ -199,6 +223,19 @@ FAQ_LLM_MODEL=/path/to/an/approved-local-model python main.py
 
 The loader automatically selects text generation for causal models and
 text-to-text generation for encoder-decoder models such as FLAN.
+
+Control device selection without editing source code:
+
+```bash
+FAQ_DEVICE=auto python main.py  # validated CUDA, otherwise CPU with a warning
+FAQ_DEVICE=cpu python main.py   # always CPU
+FAQ_DEVICE=cuda python main.py  # require a working allocated GPU
+```
+
+The same validated device is used by the bi-encoder, cross-encoder, embedding
+cache, and generation model. CUDA selection checks the GPU compute capability,
+the architectures compiled into PyTorch, and a real tensor operation in an
+isolated subprocess before loading any models.
 
 ## Routing Behavior
 
@@ -268,6 +305,7 @@ Do not commit trace logs; they may contain user queries.
 | `grounding.py` | Evidence blocks, citation validation, and extractive fallback |
 | `source_confidence.py` | Source trust, freshness, and consistency scoring |
 | `prompt.py` | Lazy model loading and grounded prompt construction |
+| `device_runtime.py` | GPU architecture validation, smoke test, and CPU fallback |
 | `scrape.py` | ICER documentation scraping and corpus creation |
 | `tree_builder.py` | Deterministic optional FAQ tree construction |
 | `tree_search.py` | Optional tree navigation and lexical fallback |
@@ -322,6 +360,29 @@ four ML package versions are tested as one set.
 Deactivate the current environment, clear `PYTHONPATH`, and create the local
 venv or named Conda environment again. On HPCC, run `module purge` before
 loading Miniforge so site-level Python modules do not take precedence.
+
+### CUDA reports `no kernel image is available`
+
+The installed wheel does not contain code for the allocated GPU. On V100 nodes,
+this occurs with the CUDA 13.0 PyTorch build because Volta support was removed.
+Recreate or update the HPCC environment from `environment.yml`, then run:
+
+```bash
+python scripts/check_environment.py --profile cuda126
+python scripts/check_gpu.py --require-cuda
+```
+
+The first command must report `torch==2.13.0+cu126`. The second must show the GPU
+name, compute capability, compiled architectures, and a passed tensor preflight.
+
+### A GPU node exits with `Illegal instruction`
+
+Run `python scripts/check_gpu.py --require-cuda` inside the scheduler allocation,
+not on a login node. The tensor check runs in a subprocess so a fatal GPU/runtime
+signal is contained and reported. If the CUDA 12.6 profile is installed and the
+preflight still fails, capture its output together with `nvidia-smi` and the node
+name for the cluster administrators; that points to a node, driver, or injected
+module problem rather than FAQ retrieval.
 
 ### A generated answer says `Grounding fallback: missing_citations`
 
