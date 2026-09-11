@@ -21,6 +21,8 @@ def command_line():
     prepare.add_argument("profile")
     collections = sub.add_parser("collections").add_subparsers(dest="action", required=True)
     collections.add_parser("list")
+    for action in ("enable", "disable"):
+        collections.add_parser(action).add_argument("name")
     importer = collections.add_parser("import")
     importer.add_argument("name")
     importer.add_argument("path")
@@ -46,14 +48,18 @@ def command_line():
         print("Saved. Start with: python main.py")
         return True
     if args.command == "collections":
-        from knowledge_store import import_collection, list_collections
+        from knowledge_store import import_collection, list_collections, set_enabled
         if args.action == "import":
             result = import_collection(args.name, args.path)
             print(f"{result['name']}: {len(result['records'])} records")
             for message in result.get("warnings", []):
                 print(f"Warning: {message}")
+        elif args.action in {"enable", "disable"}:
+            set_enabled(args.name, args.action == "enable")
+            print(f"{args.name}: {args.action}d")
         else:
-            for collection in list_collections():
-                print(f"{collection['name']}: {len(collection['records'])} records")
+            for collection in list_collections(include_disabled=True):
+                status = "enabled" if collection.get("enabled", True) else "disabled"
+                print(f"{collection['name']}: {len(collection['records'])} records ({status})")
         return True
     return False

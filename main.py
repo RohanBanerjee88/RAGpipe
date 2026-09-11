@@ -13,6 +13,7 @@ from grounding import (
     extractive_grounded_answer,
     format_sources,
     validate_grounded_answer,
+    evidence_excerpts,
 )
 from observability import trace_event
 from config import SUPPORT_LINK, ICER_DOCS_BASE, DEBUG_MODE
@@ -39,6 +40,7 @@ class SmartFAQAssistant:
         self.retriever = FAQRetriever(debug=self.debug)
         self.llama = None
         self.stats = {
+            "clarified_queries": 0,
             "total_queries": 0,
             "direct_responses": 0,
             "llama_responses": 0,
@@ -90,11 +92,15 @@ class SmartFAQAssistant:
         if not decision['result']:
             self.stats["failed_queries"] += 1
             answer = self._generate_no_match_response()
-            return answer, "no_match", "none"
+            return self._generate_insufficient_evidence_response(), "abstain", "none"
         
         result = decision['result']
         confidence = result['confidence']
         route = decision['route']
+        if route == "clarify":
+            self.stats["clarified_queries"] += 1
+            choices = ", ".join(decision["collections"])
+            return f"Which collection do you mean: {choices}? Include its name in your question or restart with --collection <name>.", "clarify", confidence
 
         trace_event("routing", {
             "query": user_query,
@@ -127,6 +133,11 @@ class SmartFAQAssistant:
         
         # SLOW PATH: Medium/Low confidence - use tree search + LLaMA
         if route == "llama":
+            from model_setup import active_profile
+            if active_profile().backend == "none":
+                sources = [source for source in decision.get("context_faqs", [result])
+                           if source.get("evidence_sufficient")]
+                return evidence_excerpts(sources, "retrieval-only"), "extractive", confidence
             self.stats["llama_responses"] += 1
             
             if self.debug:
@@ -134,6 +145,11 @@ class SmartFAQAssistant:
             
             # Load LLaMA if needed
             if not self._load_llama_if_needed():
+                sources = [source for source in decision.get("context_faqs", [result])
+                           if source.get("evidence_sufficient") and
+                           (source.get("raw_score", -100) >= 1 or source.get("bi_score", 0) >= 0.4)]
+                if sources:
+                    return evidence_excerpts(sources), "extractive", confidence
                 if confidence == "medium":
                     if self.debug:
                         print("⚠️  Falling back to the supported FAQ match")
@@ -253,12 +269,11 @@ class SmartFAQAssistant:
             if response is None:
                 raise Exception("LLaMA returned None")
 
-            valid, validation_reason = validate_grounded_answer(response, len(sources))
+            valid, validation_reason = validate_grounded_answer(response, len(sources), sources)
             if valid and INSUFFICIENT_EVIDENCE in response:
                 return self._generate_insufficient_evidence_response(), "abstain"
             if not valid:
-                fallback = extractive_grounded_answer(sources[0], validation_reason)
-                return f"{fallback}\n\n{format_sources(sources[:1])}", "extractive_fallback"
+                return evidence_excerpts(sources, validation_reason), "extractive_fallback"
 
             return f"{response}\n\n{format_sources(sources)}", "generated"
             
@@ -266,8 +281,7 @@ class SmartFAQAssistant:
             if self.debug:
                 print(f"❌ LLaMA generation failed: {e}")
             
-            fallback = extractive_grounded_answer(context_faqs[0], "generation_error")
-            return f"{fallback}\n\n{format_sources(context_faqs[:1])}", "extractive_fallback"
+            return evidence_excerpts(context_faqs, "generation_error"), "extractive_fallback"
 
     def _normalize_context_faqs(self, context_faqs):
         """
@@ -321,12 +335,10 @@ class SmartFAQAssistant:
     def _generate_insufficient_evidence_response(self):
         """Return a safe response without presenting an irrelevant closest match."""
         return f"""
-I could not find enough evidence in the indexed ICER documentation to answer this reliably.
+I could not find enough evidence in the selected collections to answer this reliably.
 
 No answer was generated because an unsupported answer would be less useful than an honest fallback.
 
-Support: {SUPPORT_LINK}
-Documentation: {ICER_DOCS_BASE}
         """.strip()
     
     def _generate_no_match_response(self):
@@ -380,11 +392,11 @@ def run_cli():
     Interactive CLI for the smart FAQ assistant
     """
     print("\n" + "="*60)
-    print("💬 ICER Smart FAQ Assistant")
+    print("Collection Knowledge Assistant")
     print("="*60)
-    print("\nWelcome! I'll help you find answers from ICER documentation.")
-    print("I use FAST responses when confident, and SLOW (but accurate)")
-    print("LLaMA synthesis for complex or ambiguous questions.\n")
+    from model_setup import active_profile, model_status
+    profile = active_profile()
+    print(f"Model: {profile.name} | {model_status(profile)}")
     
     assistant = SmartFAQAssistant(debug=DEBUG_MODE)
     
