@@ -474,6 +474,9 @@ def run_cli():
 def main():
     """Main entry point"""
     try:
+        from terminal_setup import command_line
+        if command_line():
+            return
         run_cli()
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")

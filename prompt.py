@@ -8,6 +8,7 @@ import os
 from transformers import AutoConfig, pipeline
 import torch
 from device_runtime import select_runtime_device
+from model_setup import generation_location
 from retriever import FAQRetriever
 from grounding import (
     INSUFFICIENT_EVIDENCE,
@@ -42,7 +43,7 @@ _llama_device = None
 
 def _get_model_name():
     """Return the configured LLM model, allowing local test overrides."""
-    return os.getenv("FAQ_LLM_MODEL", LLAMA_MODEL)
+    return generation_location()
 
 
 def _get_pipeline_task(model_name):
@@ -51,7 +52,7 @@ def _get_pipeline_task(model_name):
     if task_override:
         return task_override
 
-    config = AutoConfig.from_pretrained(model_name)
+    config = AutoConfig.from_pretrained(model_name, local_files_only=True)
     if getattr(config, "is_encoder_decoder", False):
         return "text2text-generation"
 
