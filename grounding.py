@@ -65,17 +65,23 @@ def validate_grounded_answer(answer: str, source_count: int, sources=None) -> Tu
             return False, "uncited_claim"
 
     if sources is not None:
-        # Conservative verification: accepted claims must be literal source spans.
+        # Whole source sentences avoid accepting "use X" from "do not use X".
         # Paraphrases need an entailment evaluator; citation presence is not proof.
         for segment in claim_segments:
             references = [int(match) for match in CITATION_PATTERN.findall(segment)]
             claim = CITATION_PATTERN.sub("", segment).strip().lstrip("-*# ").rstrip(".!? ")
-            if not claim or not references:
+            if not claim:
                 continue
+            if not references:
+                return False, "uncited_claim"
             claim = " ".join(claim.lower().split())
-            if not any(re.search(r"(?<!\w)" + re.escape(claim) + r"(?!\w)", " ".join(
-                str(sources[index - 1].get("matched_answer", sources[index - 1].get("answer", ""))).lower().split()
-            )) for index in references):
+            source_claims = {
+                " ".join(sentence.strip().lstrip("-*# ").rstrip(".!? ").lower().split())
+                for index in references
+                for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(sources[index - 1].get(
+                    "matched_answer", sources[index - 1].get("answer", ""))))
+            }
+            if claim not in source_claims:
                 return False, "unverified_claim_support"
 
     return True, "grounded"

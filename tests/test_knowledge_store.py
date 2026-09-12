@@ -90,6 +90,38 @@ class ImportTests(unittest.TestCase):
         (self.docs / "reads.fastq").write_text("ACGT")
         self.assertIn("unsupported", self.ingest()["warnings"][0])
 
+    def test_long_faq_preserves_complete_canonical_answer(self):
+        from local_store import write_json
+        answer = "Long instruction with an important prerequisite. " * 100
+        write_json(self.docs / "faq.json", [{"question": "What is the procedure?", "answer": answer}])
+        records = self.ingest()["records"]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["answer"], answer)
+
+    def test_tsv_headers_and_sample_locations(self):
+        path = self.docs / "samples.tsv"
+        path.write_text("specimen\tassay\nA\tRNA-seq\n")
+        record = self.ingest()["records"][0]
+        self.assertIn("Columns: specimen, assay", record["text"])
+        self.assertIn("sample rows 2-6", record["location"])
+
+    def test_text_pdf_preserves_page_and_body(self):
+        from pypdf import PdfWriter
+        from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+        writer = PdfWriter()
+        page = writer.add_blank_page(width=300, height=300)
+        font = DictionaryObject({NameObject("/Type"): NameObject("/Font"),
+                                 NameObject("/Subtype"): NameObject("/Type1"),
+                                 NameObject("/BaseFont"): NameObject("/Helvetica")})
+        page[NameObject("/Resources")] = DictionaryObject({NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})})
+        stream = DecodedStreamObject()
+        stream.set_data(b"BT /F1 12 Tf 20 250 Td (Keep RNA frozen.) Tj ET")
+        page[NameObject("/Contents")] = stream
+        writer.write(self.docs / "protocol.pdf")
+        record = self.ingest()["records"][0]
+        self.assertIn("Keep RNA frozen.", record["text"])
+        self.assertIn("page 1", record["location"])
+
 
 class ClaimSupportTests(unittest.TestCase):
     def test_citation_only_is_not_an_answer(self):
@@ -103,6 +135,9 @@ class ClaimSupportTests(unittest.TestCase):
     def test_source_quote_is_supported(self):
         sources = [{"answer": "Keep samples at -80 C."}]
         self.assertTrue(validate_grounded_answer("Keep samples at -80 C. [S1]", 1, sources)[0])
+
+    def test_quote_cannot_drop_negation(self):
+        self.assertFalse(validate_grounded_answer("Use bleach. [S1]", 1, [{"answer": "Do not use bleach."}])[0])
 
     def test_abstention_token_does_not_bypass_validation(self):
         self.assertFalse(validate_grounded_answer("INSUFFICIENT_EVIDENCE but samples are immortal.", 1, [])[0])

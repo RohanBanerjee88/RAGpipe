@@ -175,14 +175,18 @@ def import_collection(name, source, tokenizer=None):
         sources = dict(previous.get("sources", {}))
         messages = []
         now = utc_now_iso()
-        parser_id = f"sentence-chunks-v2:{CHUNK_TOKENS}:{getattr(tokenizer, 'name_or_path', 'custom')}"
+        parser_id = f"sentence-chunks-v3:{CHUNK_TOKENS}:{getattr(tokenizer, 'name_or_path', 'custom')}"
         for path in files:
             if path.suffix.lower() not in SUPPORTED:
                 messages.append(f"Skipped {path.name}: unsupported format")
                 continue
             key = str(path)
-            with path.open("rb") as stream:
-                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            try:
+                with path.open("rb") as stream:
+                    digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            except OSError as exc:
+                messages.append(f"Skipped {path.name}: {exc}; previous records retained")
+                continue
             old = sources.get(key, {})
             if old.get("hash") == digest and old.get("parser") == parser_id:
                 continue
@@ -190,7 +194,9 @@ def import_collection(name, source, tokenizer=None):
             new_records = []
             try:
                 for section_index, (title, location, text, kind) in enumerate(source_sections(path)):
-                    for chunk_index, chunk in enumerate(token_chunks(text, tokenizer, 160 if kind == "dataset_description" else CHUNK_TOKENS)):
+                    # FAQ answers are canonical responses, not partial document excerpts.
+                    chunks = [text] if kind == "faq" else token_chunks(text, tokenizer, 160 if kind == "dataset_description" else CHUNK_TOKENS)
+                    for chunk_index, chunk in enumerate(chunks):
                         if kind == "dataset_description":
                             chunk = "Bounded dataset description/sample, not a full analysis.\n" + chunk
                         source_id = sha256_text(f"{name}\n{key}\n{section_index}\n{chunk_index}")[:24]

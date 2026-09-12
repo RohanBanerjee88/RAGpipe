@@ -1,5 +1,6 @@
 .env
 *.json
+!docs/validation/*.json
 
 .venv-codex/
 .venv/

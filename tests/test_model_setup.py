@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import model_setup as models
 from local_store import write_json
@@ -71,3 +71,33 @@ class ModelSetupTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "disabled"):
                 models.generation_location()
             location.assert_not_called()
+
+    def test_first_prepare_pins_download_for_cached_restart(self):
+        with patch.dict(os.environ, {"HF_HUB_OFFLINE": "0"}), patch("huggingface_hub.snapshot_download", return_value="/cache/commit123") as download:
+            models.model_location("google/flan-t5-small", download=True)
+            self.assertFalse(download.call_args.kwargs["local_files_only"])
+            models.model_location("google/flan-t5-small")
+            self.assertTrue(download.call_args.kwargs["local_files_only"])
+            self.assertEqual(download.call_args.kwargs["revision"], "commit123")
+
+    def test_offline_preparation_cannot_download(self):
+        models.configure_session("flan-small", offline=True)
+        with patch("huggingface_hub.snapshot_download", return_value="/cache/commit123") as download:
+            models.model_location("google/flan-t5-small", download=True)
+            self.assertTrue(download.call_args.kwargs["local_files_only"])
+
+    def test_empty_shard_index_is_not_downloaded_model(self):
+        directory = Path(self.temp.name)
+        write_json(directory / "config.json", {})
+        write_json(directory / "model.safetensors.index.json", {"weight_map": {}})
+        with self.assertRaisesRegex(FileNotFoundError, "Empty model shard"):
+            models.check_weights(directory)
+
+    def test_generator_does_not_silently_truncate_evidence(self):
+        import prompt
+        pipeline = Mock()
+        pipeline.tokenizer.model_max_length = 4
+        pipeline.tokenizer.return_value = {"input_ids": list(range(8))}
+        with patch.object(prompt, "get_llama_pipeline", return_value=pipeline), patch.object(prompt, "get_llama_task", return_value="text2text-generation"):
+            self.assertIsNone(prompt.generate_llama_response("Evidence beyond the model window"))
+            pipeline.assert_not_called()

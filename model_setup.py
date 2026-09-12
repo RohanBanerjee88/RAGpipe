@@ -101,7 +101,10 @@ def check_weights(path):
     indexes = list(path.glob("*.index.json"))
     if indexes:
         for index in indexes:
-            for shard in set(read_json(index).get("weight_map", {}).values()):
+            shards = read_json(index).get("weight_map", {})
+            if not shards:
+                raise FileNotFoundError(f"Empty model shard index: {index}")
+            for shard in set(shards.values()):
                 if not (path / shard).is_file():
                     raise FileNotFoundError(f"Missing model shard: {shard}")
     elif not any(path.glob("*.safetensors")) and not (path / "pytorch_model.bin").exists():

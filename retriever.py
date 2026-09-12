@@ -170,7 +170,7 @@ class FAQRetriever:
             parts.append(embeddings)
             self.embedded_passages += count
         self.question_embeddings = torch.cat(parts)
-        return
+
     def _normalize_scores(self, scores):
         """
         Normalize scores to 0-1 range for consistent thresholding
@@ -214,9 +214,10 @@ class FAQRetriever:
         }
         if bi_score >= 0.60 and raw_score >= 3.0:
             return "high", False, details
-        if bi_score >= 0.40 or raw_score >= 1.0:
+        if bi_score >= 0.60 or raw_score >= 1.0:
             return "medium", True, details
         return "very_low", True, details
+
     def _lexical_rerank_boost(self, user_query, faq):
         """
         Add a small reranking boost for exact technical token matches.
@@ -557,10 +558,21 @@ class FAQRetriever:
         for result in supported:
             tops.setdefault(result["collection"], result)
         multi = bool(re.search(r"\b(compare|both|across|versus)\b", user_query, re.I))
+        overlapping_sources = [r for r in supported
+            if r["collection"] == best_match["collection"]
+            and r["matched_question"].lower() == best_match["matched_question"].lower()
+            and r["url"] != best_match["url"]
+            and r["matched_answer"] != best_match["matched_answer"]]
+        if overlapping_sources and not multi:
+            return {"result": best_match, "route": "clarify", "reason": "ambiguous_sources",
+                    "collections": [best_match["collection"]],
+                    "context_faqs": [best_match, overlapping_sources[0]]}
         if len(tops) > 1:
             first, second = list(tops.values())[:2]
             ambiguous = abs((first["raw_score"] + 4 * first["bi_score"]) -
                             (second["raw_score"] + 4 * second["bi_score"])) < 1.5
+            ambiguous |= (first["matched_question"].lower() == second["matched_question"].lower()
+                          and first["matched_answer"] != second["matched_answer"])
             if any(re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", user_query, re.I) for name in tops):
                 ambiguous = False
             if ambiguous and not multi:

@@ -29,7 +29,7 @@ class SmartFAQAssistant:
     Intelligent FAQ assistant with adaptive routing
     """
     
-    def __init__(self, debug=None):
+    def __init__(self, debug=None, retriever=None):
         """
         Initialize the assistant
         
@@ -37,13 +37,15 @@ class SmartFAQAssistant:
             debug: Override DEBUG_MODE from config if specified
         """
         self.debug = debug if debug is not None else DEBUG_MODE
-        self.retriever = FAQRetriever(debug=self.debug)
+        self.retriever = retriever if retriever is not None else FAQRetriever(debug=self.debug)
         self.llama = None
+        self.pending_clarification = []
         self.stats = {
             "clarified_queries": 0,
             "total_queries": 0,
             "direct_responses": 0,
             "llama_responses": 0,
+            "generator_invocations": 0,
             "abstained_queries": 0,
             "grounding_fallbacks": 0,
             "failed_queries": 0
@@ -86,12 +88,19 @@ class SmartFAQAssistant:
             print(f"{'='*60}")
         
         # Get routing decision from retriever
+        if self.pending_clarification and user_query.strip().isdigit():
+            number = int(user_query.strip())
+            if not 1 <= number <= len(self.pending_clarification):
+                return f"Choose a number from 1 to {len(self.pending_clarification)}, or ask a more specific question.", "clarify", "low"
+            selected = self.pending_clarification[number - 1]
+            self.pending_clarification = []
+            return evidence_excerpts([selected], "selected source"), "extractive", "medium"
+        self.pending_clarification = []
         decision = self.retriever.get_best_match(user_query)
         
         # Handle no results
         if not decision['result']:
             self.stats["failed_queries"] += 1
-            answer = self._generate_no_match_response()
             return self._generate_insufficient_evidence_response(), "abstain", "none"
         
         result = decision['result']
@@ -99,8 +108,13 @@ class SmartFAQAssistant:
         route = decision['route']
         if route == "clarify":
             self.stats["clarified_queries"] += 1
-            choices = ", ".join(decision["collections"])
-            return f"Which collection do you mean: {choices}? Include its name in your question or restart with --collection <name>.", "clarify", confidence
+            trace_event("routing", {"query": user_query, "route": route,
+                                     "reason": decision.get("reason"),
+                                     "source_ids": [r.get("source_id") for r in decision["context_faqs"]]})
+            self.pending_clarification = decision["context_faqs"]
+            choices = "\n".join(f"{i}. {r['collection']}: {r['url']} ({r.get('location', '')}, version {r.get('version', 1)})"
+                                for i, r in enumerate(self.pending_clarification, 1))
+            return f"Several sources match. Which should I use?\n{choices}\nReply with a number for that source's excerpt, or ask a more specific question.", "clarify", confidence
 
         trace_event("routing", {
             "query": user_query,
@@ -133,6 +147,8 @@ class SmartFAQAssistant:
         
         # SLOW PATH: Medium/Low confidence - use tree search + LLaMA
         if route == "llama":
+            if decision.get("multiple_collections"):
+                return evidence_excerpts(decision["context_faqs"], "multiple collections"), "extractive", confidence
             from model_setup import active_profile
             if active_profile().backend == "none":
                 sources = [source for source in decision.get("context_faqs", [result])
@@ -169,7 +185,7 @@ class SmartFAQAssistant:
             # Use tree search for better context (if enabled)
             from config import TREE_SEARCH_ENABLED, TREE_JSON_PATH
             
-            if TREE_SEARCH_ENABLED:
+            if TREE_SEARCH_ENABLED and result.get("collection", "icer") == "icer":
                 try:
                     # Lazy load tree searcher
                     if not hasattr(self, 'tree_searcher'):
@@ -264,6 +280,7 @@ class SmartFAQAssistant:
         
         # Generate response
         try:
+            self.stats["generator_invocations"] += 1
             response = generate_llama_response(prompt, confidence_level=confidence)
             
             if response is None:
@@ -373,6 +390,9 @@ I couldn't find relevant information in the ICER documentation for your question
         print(f"  Total Queries: {self.stats['total_queries']}")
         print(f"  Direct Responses (Fast): {self.stats['direct_responses']}")
         print(f"  LLaMA Responses (Slow): {self.stats['llama_responses']}")
+        print(f"  Generation Attempts: {self.stats['generator_invocations']}")
+        print(f"  Clarifications: {self.stats['clarified_queries']}")
+        print(f"  Abstentions: {self.stats['abstained_queries']}")
         print(f"  Failed Queries: {self.stats['failed_queries']}")
         
         if self.stats['total_queries'] > 0:
@@ -413,7 +433,7 @@ def run_cli():
             
             # Handle exit
             if user_input.lower() in ["quit", "exit", "q"]:
-                print("\n👋 Thank you for using ICER FAQ Assistant!")
+                print("\nThank you for using Collection Knowledge Assistant!")
                 assistant.print_stats()
                 print("Goodbye! 🎓\n")
                 break
