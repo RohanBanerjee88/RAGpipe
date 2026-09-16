@@ -25,7 +25,9 @@ def command_line():
         collections.add_parser(action).add_argument("name")
     importer = collections.add_parser("import")
     importer.add_argument("name")
-    importer.add_argument("path")
+    importer.add_argument("source", help="local file/directory or website URL")
+    importer.add_argument("--max-pages", type=int, default=50,
+                          help="maximum same-site pages for website imports (default: 50)")
     args = parser.parse_args()
     configure_session(args.model, args.offline)
     os.environ["FAQ_COLLECTION"] = args.collection
@@ -50,7 +52,7 @@ def command_line():
     if args.command == "collections":
         from knowledge_store import import_collection, list_collections, set_enabled
         if args.action == "import":
-            result = import_collection(args.name, args.path)
+            result = import_collection(args.name, args.source, max_pages=args.max_pages)
             print(f"{result['name']}: {len(result['records'])} records")
             for message in result.get("warnings", []):
                 print(f"Warning: {message}")

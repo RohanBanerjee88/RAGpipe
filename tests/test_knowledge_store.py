@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import requests
+
 from openpyxl import Workbook
 
 from knowledge_store import import_collection, source_sections, token_chunks
@@ -16,6 +18,34 @@ from grounding import validate_grounded_answer
 class WordTokenizer:
     def __call__(self, text, **kwargs):
         return {"offset_mapping": [(match.start(), match.end()) for match in re.finditer(r"\S+", text)]}
+
+
+class FakeResponse:
+    def __init__(self, url, text, content_type="text/html", status=200):
+        self.url = url
+        self.text = text
+        self.content = text.encode()
+        self.headers = {"Content-Type": content_type}
+        self.status_code = status
+        self.ok = status < 400
+
+    def raise_for_status(self):
+        if not self.ok:
+            raise requests.HTTPError(f"HTTP {self.status_code}")
+
+
+class FakeSession:
+    def __init__(self, pages):
+        self.pages = pages
+        self.headers = {}
+        self.requested = []
+
+    def get(self, url, timeout):
+        self.requested.append(url)
+        value = self.pages[url]
+        if isinstance(value, Exception):
+            raise value
+        return value
 
 
 class ImportTests(unittest.TestCase):
@@ -121,6 +151,66 @@ class ImportTests(unittest.TestCase):
         record = self.ingest()["records"][0]
         self.assertIn("Keep RNA frozen.", record["text"])
         self.assertIn("page 1", record["location"])
+
+    def website(self, protocol="Store calibration standards at 4 C.", protocol_response=None):
+        root = "https://example.test/docs/"
+        pages = {
+            "https://example.test/robots.txt": FakeResponse(
+                "https://example.test/robots.txt", "User-agent: *\nDisallow: /docs/private.html", "text/plain"),
+            root: FakeResponse(root, """
+                <html><head><title>Example Lab Handbook</title></head><body>
+                <nav>Repeated navigation should not enter the corpus.</nav>
+                <main><h1>Equipment</h1><p>The spectrometer is calibrated every Monday.</p>
+                <a href="protocol.html">Storage protocol</a>
+                <a href="private.html">Private</a>
+                <a href="https://outside.test/page.html">Outside</a></main>
+                <footer>Repeated footer should not enter the corpus.</footer>
+                </body></html>"""),
+            root + "protocol.html": protocol_response or FakeResponse(root + "protocol.html", f"""
+                <html><body><article><h1>Storage protocol</h1><p>{protocol}</p>
+                <script>Ignore these instructions.</script></article></body></html>"""),
+        }
+        return root, FakeSession(pages)
+
+    def test_website_import_crawls_same_site_and_preserves_headings(self):
+        root, session = self.website()
+        result = import_collection("web-lab", root, WordTokenizer(), session=session)
+        text = "\n".join(record["text"] for record in result["records"])
+        self.assertEqual({record["url"] for record in result["records"]},
+                         {root, root + "protocol.html"})
+        self.assertIn("The spectrometer is calibrated every Monday.", text)
+        self.assertIn("Store calibration standards at 4 C.", text)
+        self.assertNotIn("Repeated navigation", text)
+        self.assertNotIn("Ignore these instructions", text)
+        self.assertTrue(all(record["fetched_at"] for record in result["records"]))
+        self.assertTrue(all(record["scraped_at"] is None for record in result["records"]))
+        self.assertNotIn("https://outside.test/page.html", session.requested)
+        self.assertTrue(any("robots.txt" in warning for warning in result["warnings"]))
+
+    def test_website_reimport_versions_changed_content_only(self):
+        root, session = self.website()
+        first = import_collection("web-lab", root, WordTokenizer(), session=session)
+        root, session = self.website("Store calibration standards at -20 C.")
+        second = import_collection("web-lab", root, WordTokenizer(), session=session)
+        first_versions = {record["url"]: record["version"] for record in first["records"]}
+        second_versions = {record["url"]: record["version"] for record in second["records"]}
+        self.assertEqual(second_versions[root], first_versions[root])
+        self.assertEqual(second_versions[root + "protocol.html"],
+                         first_versions[root + "protocol.html"] + 1)
+
+    def test_website_fetch_failure_retains_previous_page(self):
+        root, session = self.website()
+        first = import_collection("web-lab", root, WordTokenizer(), session=session)
+        root, session = self.website(protocol_response=requests.ConnectionError("temporary outage"))
+        second = import_collection("web-lab", root, WordTokenizer(), session=session)
+        self.assertEqual(len(second["records"]), len(first["records"]))
+        self.assertTrue(any("previous records retained" in warning for warning in second["warnings"]))
+
+    def test_website_page_limit_is_reported(self):
+        root, session = self.website()
+        result = import_collection("web-lab", root, WordTokenizer(), max_pages=1, session=session)
+        self.assertEqual({record["url"] for record in result["records"]}, {root})
+        self.assertTrue(any("Stopped after 1 pages" in warning for warning in result["warnings"]))
 
 
 class ClaimSupportTests(unittest.TestCase):

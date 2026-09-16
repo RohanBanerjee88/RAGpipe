@@ -419,6 +419,7 @@ class FAQRetriever:
                 "record_type": faq.get("record_type", "faq"),
                 "location": faq.get("location", ""),
                 "imported_at": faq.get("imported_at"),
+                "fetched_at": faq.get("fetched_at"),
                 "raw_score": candidate["raw_score"],
                 "rerank_score": candidate["rerank_score"],
                 "rerank_boost": candidate["rerank_boost"],

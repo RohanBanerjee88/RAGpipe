@@ -127,6 +127,7 @@ excerpts; missing retrieval weights require preparation before search.
 
 ```bash
 python main.py collections import atlas /absolute/path/to/lab-documents
+python main.py collections import handbook https://example.edu/lab/handbook/ --max-pages 50
 python main.py collections list
 python main.py --offline --collection auto --model retrieval-only
 python main.py --offline --collection atlas --model flan-base
@@ -134,10 +135,19 @@ python main.py collections disable atlas
 python main.py collections enable atlas
 ```
 
-Imports support text PDFs, Markdown, plain text, FAQ JSON, CSV, TSV, and XLSX.
+Imports support websites, text PDFs, Markdown, plain text, FAQ JSON, CSV, TSV, and XLSX.
 FAQ JSON is a list of objects with `question` and `answer`, or an object containing
 a `faqs` list. Existing ICER data is adapted automatically; rescraping is unnecessary.
 Scanned PDFs, DOCX, and raw sequencing files are reported as unsupported/unreadable.
+
+Website imports crawl server-rendered HTML from the starting URL and links beneath
+the same site path. They respect `robots.txt`, ignore off-site links and non-HTML
+assets, remove navigation/scripts/forms and other repeated page furniture, and
+preserve page titles, headings, section names, and source URLs. The default limit
+is 50 pages; raise it deliberately with `--max-pages`. JavaScript-only pages,
+authenticated sites, sitemaps with no reachable links, and browser sessions are
+not supported in this version. Start at the narrowest useful documentation URL
+instead of the site's home page for a cleaner, faster corpus.
 
 Tables create descriptions from filenames, sheets, column headers, and at most
 five sample rows. Formula cells are labeled without execution. Samples are not
@@ -153,6 +163,10 @@ idempotent. Changed sources advance their content version; failed replacements
 retain previous records and print warnings. Directory reimports remove records
 for files deleted from that directory. Importing another file adds it to the collection.
 FAQ JSON answers remain complete for the direct-answer path.
+Website reimports hash extracted article text rather than menus or raw HTML, so
+meaningful page changes advance the version while temporary fetch failures retain
+the last good copy. A complete recrawl removes pages that are no longer linked;
+page-limit-truncated crawls do not delete previously indexed pages.
 
 Automatic mode searches enabled collections independently, sharing retrieval
 models and batched reranking. Ambiguous matches ask for clarification; name a
@@ -173,6 +187,7 @@ encoder fingerprint, independent of the generator selection.
 ```bash
 python -m unittest discover -s tests -v
 python scripts/smoke_setup.py
+FAQ_DEVICE=cpu python scripts/evaluate_website.py
 FAQ_DEVICE=cpu python scripts/evaluate_segm.py --growth --output /tmp/segm-growth.json
 FAQ_DEVICE=cpu python scripts/evaluate_models.py --output /tmp/segm-models.json
 ```
@@ -181,7 +196,8 @@ Both scripts use cached models offline. The collection evaluator creates isolate
 synthetic lab fixtures and checks the original ICER questions with up to 10,000
 additional passages across ten collections. It records timing, peak memory,
 incremental embedding counts, cache latency, routing, and retrieval accuracy.
-The model evaluator runs the same evidence checks against FLAN small and base.
+The website evaluator builds and retrieves from a fictional materials-lab website
+without making network requests. The model evaluator runs the same evidence checks against FLAN small and base.
 The setup smoke test uses an empty application store and already-cached Hub models.
 For a paired timing comparison, run `scripts/benchmark_retrieval.py --repo <checkout>`
 against each checkout sequentially. Pass its pre-change p95 as

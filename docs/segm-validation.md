@@ -38,10 +38,18 @@ was used.
   using the same three factual questions for both models. A citation label alone
   does not pass. Empty output, invented facts, missing citations, and omitted
   negations have dedicated validation checks.
+- Website ingestion is tested against a fictional two-page external site held
+  entirely in the test suite. The mock includes navigation/footer noise, headings,
+  an off-site link, a robots.txt-blocked page, a temporary outage, changed content,
+  and a page-limit case. No real external website was copied into the repository.
+  A separate offline end-to-end check indexed the mock materials site with the
+  real encoder/reranker and found both expected facts in the top five results;
+  navigation boilerplate was absent from the corpus.
 
 ## Final collection results
 
-All 68 unit tests passed. The final growth run passed its quality gates and the same-hardware p95 gate:
+All 72 unit tests passed, including four mock-website cases. The final growth run
+passed its quality gates and the same-hardware p95 gate:
 32/32 ICER cases, 5/5 development cases, and 21/21 lab acceptance cases. Supported
 Recall@5 was 100%; none of the five explicit lab negative cases produced an
 answer. Both growth sizes retained 32/32 ICER and 21/21 lab results, including
@@ -128,6 +136,9 @@ No H100/V100/A100 runtime was available here. The existing architecture-selectio
 unit tests still run, but cluster performance and arbitrary user-supplied models
 remain deployment checks. Local model directories must be complete Transformers
 models with a compatible tokenizer; custom executable model code is not enabled.
+Website support covers public, server-rendered HTML in a bounded same-site subtree.
+It does not render JavaScript, authenticate, submit forms, bypass robots.txt, or
+guarantee discovery of pages that are not linked from the selected starting URL.
 
 Machine-readable results are checked in under [validation/](validation/):
 [collection acceptance](validation/segm-acceptance.json),
@@ -142,6 +153,7 @@ python scripts/check_environment.py
 python -m unittest discover -s tests -v
 python scripts/end_to_end_diagnostics.py
 python scripts/smoke_setup.py
+FAQ_DEVICE=cpu python scripts/evaluate_website.py
 FAQ_DEVICE=cpu python scripts/benchmark_retrieval.py --repo /path/to/main-checkout
 FAQ_DEVICE=cpu python scripts/benchmark_retrieval.py
 FAQ_DEVICE=cpu python scripts/evaluate_segm.py --growth --baseline-p95-ms 78.802167 --output /tmp/segm-acceptance.json

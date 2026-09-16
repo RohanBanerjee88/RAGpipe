@@ -28,7 +28,7 @@ def build_evidence_blocks(context_faqs: Iterable[Dict], max_sources: int = 5) ->
                 f"URL: {faq.get('url', 'N/A')}",
                 f"Collection: {faq.get('collection', 'icer')}",
                 f"Location: {faq.get('location', '')}",
-                f"Retrieved: {faq.get('scraped_at', 'unknown')}",
+                f"Fetched: {faq.get('fetched_at') or faq.get('scraped_at') or 'unknown'}",
             ])
         )
 
@@ -91,12 +91,12 @@ def format_sources(sources: Iterable[Dict]) -> str:
     lines = ["Sources:"]
     for index, faq in enumerate(sources, start=1):
         section = faq.get("section", faq.get("category", "General"))
-        retrieved = faq.get("scraped_at") or "unknown"
+        fetched = faq.get("fetched_at") or faq.get("scraped_at") or "unknown"
         version = faq.get("version", 1)
         lines.append(
             f"[{source_label(index)}] {faq.get('collection', 'icer')} | {section} | "
             f"{faq.get('url', 'N/A')} | {faq.get('location', '')} | "
-            f"retrieved {retrieved} | version {version}"
+            f"fetched {fetched} | version {version}"
         )
     return "\n".join(lines)
 
