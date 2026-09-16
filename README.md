@@ -1,4 +1,4 @@
-# ICER Grounded FAQ Assistant
+# Collection Knowledge Assistant
 
 A local retrieval-augmented assistant for the Institute for Cyber-Enabled
 Research (ICER) documentation at Michigan State University. The system answers
@@ -8,8 +8,15 @@ support an answer.
 
 This repository is designed to run locally. Retrieval uses a small bi-encoder,
 BM25 keyword search, and a cross-encoder reranker. A small FLAN model is the
-default for the rare slow path, so a fresh clone does not require access to a
+default for the slow path, so a fresh clone does not require access to a
 gated model repository.
+The invocation rate depends on the collection: FAQ-heavy workloads often avoid
+generation, while document questions more often need excerpts or synthesis.
+
+The `segM` extension adds independent lab collections, automatic collection
+selection, named model profiles, and explicit offline operation. Lab documents
+and dataset descriptions can be searched alongside ICER without merging their
+keyword statistics or embedding caches.
 
 ## How It Works
 
@@ -83,6 +90,125 @@ python scripts/check_environment.py
 The check must pass before scraping or running the assistant. Always use
 `python -m pip`, which guarantees that installation targets the active Python.
 
+Prepare models once before the first search or import:
+
+```bash
+python main.py setup
+# Or use explicit commands:
+python main.py models list
+python main.py models prepare flan-base
+```
+
+Preparation downloads missing weights; ordinary startup uses cached files only.
+For an environment without a generator, use `models prepare retrieval-only`.
+Scraping requires network access, but does not require inference models.
+
+### Model Profiles and Offline Use
+
+```bash
+python main.py --model flan-small
+python main.py --offline --model retrieval-only
+python main.py --offline --model /absolute/path/to/model
+```
+
+Profiles live in `model_profiles.toml`. Add a `[models.name]` entry with `model`
+(Hub repository or local directory) and optional `revision`. Supported generators
+are Transformers-compatible causal or encoder-decoder models; GGUF, Ollama,
+remote APIs, and models requiring custom executable code are not supported.
+Only one generator is loaded lazily per session. Restart to change it.
+
+Selection precedence is `--model`, `FAQ_LLM_MODEL`, the choice saved by `setup`,
+then the TOML default (`flan-base`). Hugging Face weights use its persistent cache
+(`HF_HOME` can relocate it). Preparation records the resolved snapshot revision
+in `.ragpipe/prepared_models.json`. Missing generation weights allow source
+excerpts; missing retrieval weights require preparation before search.
+
+### Import Lab Information
+
+```bash
+python main.py collections import atlas /absolute/path/to/lab-documents
+python main.py collections import handbook https://example.edu/lab/handbook/ --max-pages 50
+python main.py collections list
+python main.py --offline --collection auto --model retrieval-only
+python main.py --offline --collection atlas --model flan-base
+python main.py collections disable atlas
+python main.py collections enable atlas
+```
+
+Imports support websites, text PDFs, Markdown, plain text, FAQ JSON, CSV, TSV, and XLSX.
+FAQ JSON is a list of objects with `question` and `answer`, or an object containing
+a `faqs` list. Existing ICER data is adapted automatically; rescraping is unnecessary.
+Scanned PDFs, DOCX, and raw sequencing files are reported as unsupported/unreadable.
+
+Website imports crawl server-rendered HTML from the starting URL and links beneath
+the same site path. They respect `robots.txt`, ignore off-site links and non-HTML
+assets, remove navigation/scripts/forms and other repeated page furniture, and
+preserve page titles, headings, section names, and source URLs. The default limit
+is 50 pages; raise it deliberately with `--max-pages`. JavaScript-only pages,
+authenticated sites, sitemaps with no reachable links, and browser sessions are
+not supported in this version. Start at the narrowest useful documentation URL
+instead of the site's home page for a cleaner, faster corpus.
+
+Tables create descriptions from filenames, sheets, column headers, and at most
+five sample rows. Formula cells are labeled without execution. Samples are not
+population summaries: calculations, statistics, and bioinformatics execution are
+outside this version. Import supplied data dictionaries as accompanying Markdown
+or text files that explicitly name the dataset and columns; meanings are never
+inferred from a column name alone.
+
+Document passages retain original wording and page/line/sheet locations. Text is
+split at sentence boundaries where possible within a 64-token limit; dataset descriptions use
+bounded 160-token fragments with sample labels. Reimporting unchanged files is
+idempotent. Changed sources advance their content version; failed replacements
+retain previous records and print warnings. Directory reimports remove records
+for files deleted from that directory. Importing another file adds it to the collection.
+FAQ JSON answers remain complete for the direct-answer path.
+Website reimports hash extracted article text rather than menus or raw HTML, so
+meaningful page changes advance the version while temporary fetch failures retain
+the last good copy. A complete recrawl removes pages that are no longer linked;
+page-limit-truncated crawls do not delete previously indexed pages.
+
+Automatic mode searches enabled collections independently, sharing retrieval
+models and batched reranking. Ambiguous matches ask for clarification; name a
+collection in the next question or select it at startup. Explicit comparisons
+return labeled excerpts from multiple collections without reconciling differences.
+For ambiguous sources, reply with the displayed number to view that source's
+excerpt, or ask a more specific question.
+
+Collection manifests and model-specific embeddings live under `.ragpipe/` (or
+`FAQ_DATA_DIR`). The data directory is local to this installation, not an access
+control boundary between users. Imported sources have unknown authority and
+freshness; importing today is not evidence that a document is current. Restart
+after imports or enable/disable changes. Embeddings are reused by content and
+encoder fingerprint, independent of the generator selection.
+
+### Collection Validation
+
+```bash
+python -m unittest discover -s tests -v
+python scripts/smoke_setup.py
+FAQ_DEVICE=cpu python scripts/evaluate_website.py
+FAQ_DEVICE=cpu python scripts/evaluate_segm.py --growth --output /tmp/segm-growth.json
+FAQ_DEVICE=cpu python scripts/evaluate_models.py --output /tmp/segm-models.json
+```
+
+Both scripts use cached models offline. The collection evaluator creates isolated
+synthetic lab fixtures and checks the original ICER questions with up to 10,000
+additional passages across ten collections. It records timing, peak memory,
+incremental embedding counts, cache latency, routing, and retrieval accuracy.
+The website evaluator builds and retrieves from a fictional materials-lab website
+without making network requests. The model evaluator runs the same evidence checks against FLAN small and base.
+The setup smoke test uses an empty application store and already-cached Hub models.
+For a paired timing comparison, run `scripts/benchmark_retrieval.py --repo <checkout>`
+against each checkout sequentially. Pass its pre-change p95 as
+`evaluate_segm.py --baseline-p95-ms <value>` to enforce the 10% regression limit.
+See `docs/segm-validation.md` for measured results and limitations.
+
+Generation validation checks citation structure and whole-sentence literal support
+in the cited text. Paraphrases are conservatively rejected in favor of cited excerpts; this is
+not a general entailment model or proof of scientific truth. FLAN often needs this
+fallback. Raw generation success and delivered excerpt quality are reported separately.
+
 ### HPCC / Conda Setup
 
 On an HPCC module system, create the dedicated Conda environment described by
@@ -147,9 +273,9 @@ creates:
 - `faq_tree.json`: optional hierarchical FAQ index
 - `scrape_metadata.json`: scrape summary
 
-The first retrieval command downloads the encoder models and creates
-`faq_embeddings.pt`. Later starts reuse the cache unless the corpus content
-changes.
+Model preparation downloads the encoders. The first retrieval command creates
+per-collection embeddings under `.ragpipe/collections/`. Later starts reuse
+unchanged content vectors; legacy `faq_embeddings.pt` is left untouched.
 
 Run the deterministic validation suite:
 
@@ -178,7 +304,7 @@ Use `stats` to inspect session routing and `quit` to exit cleanly.
 
 The reference run produces:
 
-- 32 focused unit tests passing, including GPU compatibility and fallback coverage
+- Focused unit tests passing, including GPU, model setup, ingestion, and fallback coverage
 - 32/32 labeled exact, paraphrased, unsupported, and adversarial cases passing
 - 100% route accuracy on the checked evaluation set
 - 100% supported Recall@5 on the checked evaluation set
@@ -324,15 +450,16 @@ stored in Git.
 
 ### The first run appears slow
 
-The first run downloads the bi-encoder, cross-encoder, and selected generation
-model, then computes corpus embeddings. Subsequent runs reuse local caches.
+Model preparation downloads the bi-encoder, cross-encoder, and selected generation
+model. The first search builds corpus embeddings. Subsequent runs reuse local caches.
 
 ### The configured LLaMA model cannot be downloaded
 
 The default FLAN model is public. To test its smaller variant:
 
 ```bash
-FAQ_LLM_MODEL=google/flan-t5-small python main.py
+python main.py models prepare flan-small
+python main.py --model flan-small
 ```
 
 For gated models, authenticate with the model provider and set

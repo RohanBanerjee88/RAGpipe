@@ -1,0 +1,16 @@
+default = "flan-base"
+
+[models.flan-base]
+model = "google/flan-t5-base"
+revision = "main"
+
+[models.flan-small]
+model = "google/flan-t5-small"
+revision = "main"
+
+[models.retrieval-only]
+backend = "none"
+
+# Add named Hugging Face repositories or absolute local model directories here.
+# [models.lab-model]
+# model = "/path/to/model"
