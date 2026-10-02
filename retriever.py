@@ -102,6 +102,8 @@ class FAQRetriever:
             if not collections:
                 raise ValueError(f"Collection {self.collection!r} is missing or empty")
         self.faqs = [record for item in collections for record in item["records"]]
+        self.context_sources = {(item["name"], path): info for item in collections
+                                for path, info in item.get("sources", {}).items()}
         if not self.faqs:
             raise ValueError("No searchable collections. Run scrape.py or collections import first.")
         self.metadata = {}
@@ -444,6 +446,9 @@ class FAQRetriever:
                 "record_type": faq.get("record_type", "faq"),
                 "literal_definition": candidate["faq_index"] in definition_indices,
                 "location": faq.get("location", ""),
+                "source_path": faq.get("source_path"),
+                "source_revision": faq.get("source_revision"),
+                "block_index": faq.get("block_index"),
                 "imported_at": faq.get("imported_at"),
                 "fetched_at": faq.get("fetched_at"),
                 "raw_score": candidate["raw_score"],

@@ -191,10 +191,17 @@ Strong literal definitions return cited source excerpts without loading a
 generator. Explicit code identifiers absent from retrieved evidence cause an
 abstention rather than a generic answer about the same topic.
 
+Code/procedure questions reconstruct full source blocks and preceding setup
+within the same heading, file, and version. Retrieval still uses short passages;
+only answer context expands. Code is not executed. Procedures above the bounded
+reconstruction limit link to the original source instead of supplying partial
+code. Reimport older external collections once to add this context metadata;
+unchanged passage embeddings are reused. ICER FAQs do not need reimporting.
+
 To run the real-document smoke checks in a separate store:
 
 ```bash
-python scripts/evaluate_bglr.py --data-dir /tmp/ragpipe-bglr-check --include-readme --output /tmp/bglr-retrieval.json
+python scripts/evaluate_bglr.py --data-dir /tmp/ragpipe-bglr-check --include-readme --procedures --output /tmp/bglr-retrieval.json
 python main.py models prepare flan-small
 python scripts/evaluate_bglr.py --data-dir /tmp/ragpipe-bglr-check --skip-import --include-readme --model flan-small --output /tmp/bglr-small.json
 python main.py models prepare flan-base
@@ -205,7 +212,7 @@ python -m unittest discover -s tests -q
 The first run downloads public documents, not model weights. Subsequent
 `--skip-import` runs are offline with prepared models. These BGLR questions are
 development smoke tests, not a held-out accuracy benchmark. Read
-the existing pull request for results and limitations.
+[the existing pull request](https://github.com/RohanBanerjee88/RAGpipe/pull/7) for results and limitations.
 
 Tables create descriptions from filenames, sheets, column headers, and at most
 five sample rows. Formula cells are labeled without execution. Samples are not
@@ -257,6 +264,28 @@ incremental embedding counts, cache latency, routing, and retrieval accuracy.
 The website evaluator builds and retrieves from a fictional materials-lab website
 without making network requests. The model evaluator runs the same evidence checks against FLAN small and base.
 The setup smoke test uses an empty application store and already-cached Hub models.
+
+Optional instruction-model comparisons can run locally with prepared weights:
+
+```bash
+python main.py models prepare qwen-small
+python main.py models prepare qwen-code-small
+FAQ_DEVICE=cpu python scripts/evaluate_models.py --profiles flan-small flan-base qwen-small qwen-code-small --max-new-tokens 512 --bglr-data-dir /tmp/ragpipe-bglr-check --output /tmp/generator-comparison.json
+python main.py --offline --model qwen-small --collection bglr
+```
+
+These profiles select Qwen2.5 0.5B Instruct and Qwen2.5 Coder 0.5B Instruct.
+Each needs roughly another 1 GB of cached weights. They are optional evaluation
+candidates, not a new default. Causal instruction models use their chat template;
+generation is deterministic and retains the same factual-support checks.
+Profiles accept an optional `max_new_tokens` (1-4096). The two Qwen profiles use
+512 to leave room for complete examples; existing profiles keep their old limit.
+The comparison above uses the same output limit for all four profiles.
+The model evaluator reports raw generation separately from excerpt fallbacks,
+checks complete code blocks and prerequisites, and exits nonzero when a generator
+fails any case. Its mock and real-document checks are development tests, not a
+held-out benchmark. No model weights or external corpus are committed.
+
 For a paired timing comparison, run `scripts/benchmark_retrieval.py --repo <checkout>`
 against each checkout sequentially. Pass its pre-change p95 as
 `evaluate_segm.py --baseline-p95-ms <value>` to enforce the 10% regression limit.

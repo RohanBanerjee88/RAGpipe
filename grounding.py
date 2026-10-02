@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Dict, Iterable, List, Tuple
+from markdown_it import MarkdownIt
 
 
 INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
@@ -51,10 +52,47 @@ def validate_grounded_answer(answer: str, source_count: int, sources=None) -> Tu
     if any(citation < 1 or citation > source_count for citation in citations):
         return False, "unknown_citation"
 
+    # Code is supported as a complete, unchanged source block, not separate lines.
+    parser = MarkdownIt()
+    lines = answer.splitlines(keepends=True)
+    removals = []
+    code_sources = set()
+    for token in parser.parse(answer):
+        if token.type != "fence":
+            continue
+        start, end = token.map
+        closing = lines[end - 1].strip()
+        if end - start < 2 or not re.fullmatch(re.escape(token.markup[0]) +
+                                              "{" + str(len(token.markup)) + ",}", closing):
+            return False, "incomplete_code_block"
+        following = "".join(lines[end:])
+        citation = re.match(r"\s*((?:\[S\d+\]\s*)+)", following)
+        if not citation:
+            return False, "uncited_code_block"
+        references = [int(value) for value in CITATION_PATTERN.findall(citation[1])]
+        code_sources.update(references)
+        if sources is not None:
+            supported = {block.content.strip() for index in references
+                         for block in parser.parse(str(sources[index - 1].get(
+                             "matched_answer", sources[index - 1].get("answer", ""))))
+                         if block.type == "fence"}
+            if token.content.strip() not in supported:
+                return False, "unverified_code_support"
+        removals.append((start, end))
+    for start, end in reversed(removals):
+        lines[start:end] = []
+    prose = "".join(lines)
+    if sources is not None:
+        quoted_prose = " ".join(CITATION_PATTERN.sub("", prose).lower().split())
+        for index in code_sources:
+            for setup in sources[index - 1].get("required_setup", []):
+                if " ".join(setup.lower().split()) not in quoted_prose:
+                    return False, "missing_procedure_setup"
+
     answer_for_claims = re.sub(
         r"([.!?])\s+((?:\[S\d+\]\s*)+)",
         r" \2\1 ",
-        answer,
+        prose,
     )
     claim_segments = re.split(r"(?<=[.!?])\s+|\n+", answer_for_claims)
     for segment in claim_segments:
@@ -121,5 +159,6 @@ def evidence_excerpts(sources, reason="generation_unavailable"):
     for index, source in enumerate(sources, 1):
         label = source.get("collection", "icer")
         body = source.get("matched_answer", source.get("answer", ""))
-        blocks.append(f"{label}:\n{body} [S{index}]")
+        separator = "\n\n" if any(token.type == "fence" for token in MarkdownIt().parse(body)) else " "
+        blocks.append(f"{label}:\n{body}{separator}[S{index}]")
     return "\n\n".join(blocks) + f"\n\nSource excerpts ({reason}).\n\n" + format_sources(sources)

@@ -11,6 +11,16 @@ revision = "main"
 [models.retrieval-only]
 backend = "none"
 
+[models.qwen-small]
+model = "Qwen/Qwen2.5-0.5B-Instruct"
+revision = "7ae557604adf67be50417f59c2c2f167def9a775"
+max_new_tokens = 512
+
+[models.qwen-code-small]
+model = "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+revision = "ea3f2471cf1b1f0db85067f1ef93848e38e88c25"
+max_new_tokens = 512
+
 # Add named Hugging Face repositories or absolute local model directories here.
 # [models.lab-model]
 # model = "/path/to/model"

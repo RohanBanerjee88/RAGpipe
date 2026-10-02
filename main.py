@@ -40,6 +40,7 @@ class SmartFAQAssistant:
         self.retriever = retriever if retriever is not None else FAQRetriever(debug=self.debug)
         self.llama = None
         self.pending_clarification = []
+        self.pending_clarification_query = ""
         self.stats = {
             "clarified_queries": 0,
             "total_queries": 0,
@@ -94,8 +95,11 @@ class SmartFAQAssistant:
                 return f"Choose a number from 1 to {len(self.pending_clarification)}, or ask a more specific question.", "clarify", "low"
             selected = self.pending_clarification[number - 1]
             self.pending_clarification = []
-            return evidence_excerpts([selected], "selected source"), "extractive", "medium"
+            sources = self._reconstruct_context(self.pending_clarification_query, [selected])
+            self.pending_clarification_query = ""
+            return evidence_excerpts(sources, "selected source"), "extractive", "medium"
         self.pending_clarification = []
+        self.pending_clarification_query = ""
         decision = self.retriever.get_best_match(user_query)
         
         # Handle no results
@@ -112,6 +116,7 @@ class SmartFAQAssistant:
                                      "reason": decision.get("reason"),
                                      "source_ids": [r.get("source_id") for r in decision["context_faqs"]]})
             self.pending_clarification = decision["context_faqs"]
+            self.pending_clarification_query = user_query
             choices = "\n".join(f"{i}. {r['collection']}: {r['url']} ({r.get('location', '')}, version {r.get('version', 1)})"
                                 for i, r in enumerate(self.pending_clarification, 1))
             return f"Several sources match. Which should I use?\n{choices}\nReply with a number for that source's excerpt, or ask a more specific question.", "clarify", confidence
@@ -147,6 +152,10 @@ class SmartFAQAssistant:
         
         # SLOW PATH: Medium/Low confidence - use tree search + LLaMA
         if route == "llama":
+            decision["context_faqs"] = self._reconstruct_context(
+                user_query, decision.get("context_faqs", [result]))
+            if any(source.get("context_incomplete") for source in decision.get("context_faqs", [])):
+                return evidence_excerpts(decision["context_faqs"], "incomplete_procedure_context"), "extractive", confidence
             if decision.get("multiple_collections"):
                 return evidence_excerpts(decision["context_faqs"], "multiple collections"), "extractive", confidence
             if result.get("literal_definition") and result.get("raw_score", -100) >= 3:
@@ -264,6 +273,13 @@ class SmartFAQAssistant:
 
         raise RuntimeError(f"Unknown route: {route}")
     
+    def _reconstruct_context(self, query, matches):
+        if not getattr(self.retriever, "context_sources", None):
+            return matches
+        from evidence_context import reconstruct_context
+        return reconstruct_context(query, matches, self.retriever.context_sources,
+                                   self.retriever.bi_encoder.tokenizer)
+
     def _generate_llama_answer(self, user_query, context_faqs, confidence):
         """
         Generate answer using LLaMA with appropriate prompt

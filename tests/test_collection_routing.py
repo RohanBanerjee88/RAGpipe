@@ -69,6 +69,21 @@ class CollectionRoutingTests(unittest.TestCase):
         with patch("prompt.DEBUG_MODE", False):
             self.assertIn("Which should I use?", get_answer_with_llama("Where should samples be stored?", retriever))
 
+    def test_procedure_clarification_reconstructs_only_selected_source(self):
+        from types import SimpleNamespace
+        from tests.test_knowledge_store import WordTokenizer
+        selected = {**result(), "source_path": "protocol.txt", "block_index": 0, "version": 1}
+        retriever = self.retriever([selected, result("boreal", "Keep samples at -20 C.")])
+        retriever.bi_encoder = SimpleNamespace(tokenizer=WordTokenizer())
+        retriever.context_sources = {("atlas", "protocol.txt"): {"version": 1, "blocks": [
+            {"text": "Complete selected procedure.", "group": 0, "code": False, "location": "lines 1-1"}]}}
+        assistant = SmartFAQAssistant(debug=False, retriever=retriever)
+        self.assertEqual(assistant.get_answer("How should samples be stored?")[1], "clarify")
+        answer, route, _ = assistant.get_answer("1")
+        self.assertEqual(route, "extractive")
+        self.assertIn("Complete selected procedure.", answer)
+        self.assertNotIn("-20 C", answer)
+
     def test_short_uncited_claim_is_rejected(self):
         from grounding import validate_grounded_answer
         valid, reason = validate_grounded_answer("Keep samples at -80 C. [S1]\nUse bleach.", 1, [result()])

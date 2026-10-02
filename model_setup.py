@@ -15,6 +15,7 @@ class ModelProfile:
     model: str = ""
     revision: str = "main"
     backend: str = "transformers"
+    max_new_tokens: int | None = None
 
 
 _active = None
@@ -32,6 +33,9 @@ def profiles():
             raise ValueError(f"Unsupported backend for {name}: {profile.backend}")
         if profile.backend != "none" and not profile.model:
             raise ValueError(f"Profile {name} needs a model repository or directory")
+        if profile.max_new_tokens is not None and (
+                type(profile.max_new_tokens) is not int or not 1 <= profile.max_new_tokens <= 4096):
+            raise ValueError(f"Profile {name}: max_new_tokens must be an integer from 1 to 4096")
         result[name] = profile
     return config.get("default", "flan-base"), result
 

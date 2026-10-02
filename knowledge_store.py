@@ -330,7 +330,9 @@ def source_sections(path):
                 raise ValueError(f"Page {number} has no extractable text; OCR is not supported")
             yield path.stem, f"page {number}", text, "passage"
     elif suffix == ".md":
-        yield from markdown_sections(path.read_text(encoding="utf-8-sig"), path.stem)
+        text = path.read_text(encoding="utf-8-sig")
+        yield from markdown_sections(text, path.stem,
+                                     blockwise=bool(re.search(r"^\s*(`{3}|~{3})", text, re.M)))
     elif suffix == ".txt":
         text = path.read_text(encoding="utf-8-sig")
         yield path.stem, f"lines 1-{len(text.splitlines())}", text, "passage"
@@ -392,10 +394,10 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
         now = utc_now_iso()
         from github_documents import github_target, github_documents
         github = website and github_target(source) is not None
-        parser_kind = "github-markdown-v3" if github else "web-sections-v1" if website else "sentence-chunks-v4"
+        parser_kind = "github-markdown-v4" if github else "web-sections-v2" if website else "sentence-chunks-v5"
         parser_id = f"{parser_kind}:{CHUNK_TOKENS}:{getattr(tokenizer, 'name_or_path', 'custom')}"
 
-        def replace_source(key, digest, sections, source_kind, source_group=None, metadata=None):
+        def replace_source(key, digest, sections, source_kind, source_group=None, metadata=None, raw_text=None):
             nonlocal records
             metadata = metadata or {}
             old = sources.get(key, {})
@@ -408,6 +410,9 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
                     sources[key].update(metadata)
                 return
             version = old.get("version", 0) + (old.get("hash") != digest)
+            sections = list(sections)
+            from evidence_context import context_blocks
+            blocks = context_blocks(sections, raw_text)
             new_records = []
             for section_index, (title, location, text, kind) in enumerate(sections):
                 # FAQ answers are canonical responses, not partial document excerpts.
@@ -434,6 +439,7 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
                         "category": name, "section": title, "url": key,
                         "location": f"{location}, passage {chunk_index + 1}",
                         "source_path": key, "content_hash": sha256_text(chunk),
+                        "block_index": section_index,
                         "version": version, "imported_at": now, "scraped_at": None,
                         "fetched_at": now if source_kind in {"website", "github"} else None,
                         **metadata,
@@ -445,6 +451,7 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
             records.extend(new_records)
             sources[key] = {"hash": digest, "version": version, "imported_at": now,
                             "parser": parser_id, "kind": source_kind, "group": source_group,
+                            "blocks": blocks,
                             **metadata}
 
         if github:
@@ -454,7 +461,7 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
             for key, digest, text, metadata in files:
                 try:
                     replace_source(key, digest, markdown_sections(text, metadata["repository_path"], blockwise=True),
-                                   "github", source, metadata)
+                                   "github", source, metadata, raw_text=text)
                     retained.add(key)
                 except Exception as exc:
                     complete = False
@@ -511,7 +518,8 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
                 messages.append(f"Skipped {path.name}: {exc}; previous records retained")
                 continue
             try:
-                replace_source(key, digest, source_sections(path), "file")
+                replace_source(key, digest, source_sections(path), "file",
+                               raw_text=path.read_text(encoding="utf-8-sig") if path.suffix.lower() == ".md" else None)
             except Exception as exc:
                 messages.append(f"Skipped {path.name}: {exc}; previous records retained")
                 continue
