@@ -212,13 +212,15 @@ def set_enabled(name, enabled):
         write_json(path, manifest)
 
 
-def token_chunks(text, tokenizer, limit=CHUNK_TOKENS):
+def token_chunks(text, tokenizer, limit=CHUNK_TOKENS, line_boundaries=False):
     """Slice original characters using token offsets, preserving source spelling."""
     encoded = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True,
                         truncation=False, verbose=False)
     offsets = encoded["offset_mapping"]
     start = 0
     boundaries = {match.start() for match in re.finditer(r"(?<=[.!?])\s+(?=[A-Z])|\n\s*\n", text)}
+    if line_boundaries:
+        boundaries.update(match.start() for match in re.finditer(r"\n", text))
     while start < len(offsets):
         end = min(start + limit, len(offsets))
         if end < len(offsets):
@@ -234,19 +236,73 @@ def token_chunks(text, tokenizer, limit=CHUNK_TOKENS):
         start = end
 
 
-def markdown_sections(text, filename):
+def markdown_sections(text, filename, blockwise=False):
     from markdown_it import MarkdownIt
     lines = text.splitlines(keepends=True)
-    headings = [token for token in MarkdownIt().parse(text) if token.type == "heading_open"]
-    starts = [(0, filename)]
-    for heading in headings:
-        start, end = heading.map
-        starts.append((start, "".join(lines[start:end]).strip().lstrip("# ")))
-    for index, (start, title) in enumerate(starts):
-        end = starts[index + 1][0] if index + 1 < len(starts) else len(lines)
-        body = "".join(lines[start:end]).strip()
-        if body:
-            yield title, f"lines {start + 1}-{end}", body, "passage"
+    tokens = MarkdownIt().parse(text)
+    if not blockwise:
+        starts = [(0, 0, filename)]
+        for token in tokens:
+            if token.type == "heading_open":
+                start, end = token.map
+                starts.append((start, end, "".join(lines[start:end]).strip().lstrip("# ")))
+        for index, (start, body_start, title) in enumerate(starts):
+            end = starts[index + 1][0] if index + 1 < len(starts) else len(lines)
+            if "".join(lines[body_start:end]).strip():
+                yield title, f"lines {start + 1}-{end}", "".join(lines[start:end]).strip(), "passage"
+        return
+    title = filename
+    pending = None
+    blocks = {"paragraph_open", "fence", "code_block", "bullet_list_open",
+              "ordered_list_open", "blockquote_open", "html_block"}
+    for index, token in enumerate(tokens):
+        if token.level != 0 or not token.map:
+            continue
+        start, end = token.map
+        if token.type == "heading_open":
+            title = "".join(lines[start:end]).strip().lstrip("# ")
+            pending = None
+        elif token.type in blocks:
+            body = "".join(lines[start:end]).strip()
+            if token.type in {"paragraph_open", "bullet_list_open", "ordered_list_open"}:
+                meaningful = False
+                for inline in itertools.islice(tokens, index + 1, None):
+                    if inline.map and inline.map[0] >= end:
+                        break
+                    link_depth = 0
+                    for child in inline.children or []:
+                        if child.type == "link_open":
+                            link_depth += 1
+                        elif child.type == "link_close":
+                            link_depth -= 1
+                        elif child.type in {"text", "code_inline"} and not link_depth:
+                            meaningful |= bool(re.search(r"\w", child.content))
+                if not meaningful:
+                    continue
+            # Bold subsection labels belong with their following content, not alone.
+            if re.fullmatch(r"\*\*[^\n]+\*\*", body):
+                pending = (start, body)
+                continue
+            if pending:
+                start = pending[0]
+                body = "".join(lines[start:end]).strip()
+                pending = None
+            if body:
+                yield title, f"lines {start + 1}-{end}", body, "passage"
+
+
+def markdown_search_text(text):
+    """Use visible text/code for retrieval, not link destinations or markup."""
+    from markdown_it import MarkdownIt
+    blocks = []
+    for token in MarkdownIt().parse(text):
+        if token.type == "inline":
+            blocks.append("".join(child.content if child.type in {"text", "code_inline"}
+                                  else " " if child.type in {"softbreak", "hardbreak"} else ""
+                                  for child in token.children or []))
+        elif token.type in {"fence", "code_block"}:
+            blocks.append(token.content)
+    return "\n".join(blocks).strip()
 
 
 def dataset_card(filename, sheet, rows):
@@ -334,21 +390,41 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
         sources = dict(previous.get("sources", {}))
         messages = []
         now = utc_now_iso()
-        parser_kind = "web-sections-v1" if website else "sentence-chunks-v3"
+        from github_documents import github_target, github_documents
+        github = website and github_target(source) is not None
+        parser_kind = "github-markdown-v3" if github else "web-sections-v1" if website else "sentence-chunks-v4"
         parser_id = f"{parser_kind}:{CHUNK_TOKENS}:{getattr(tokenizer, 'name_or_path', 'custom')}"
 
-        def replace_source(key, digest, sections, source_kind, source_group=None):
+        def replace_source(key, digest, sections, source_kind, source_group=None, metadata=None):
             nonlocal records
+            metadata = metadata or {}
             old = sources.get(key, {})
             if old.get("hash") == digest and old.get("parser") == parser_id:
+                if metadata:
+                    if metadata.get("source_revision") != old.get("source_revision"):
+                        metadata = {**metadata, "fetched_at": now}
+                    records = [{**record, **metadata} if record.get("source_path") == key else record
+                               for record in records]
+                    sources[key].update(metadata)
                 return
             version = old.get("version", 0) + (old.get("hash") != digest)
             new_records = []
             for section_index, (title, location, text, kind) in enumerate(sections):
                 # FAQ answers are canonical responses, not partial document excerpts.
                 chunks = [text] if kind == "faq" else token_chunks(
-                    text, tokenizer, 160 if kind == "dataset_description" else CHUNK_TOKENS)
+                    text, tokenizer, 160 if kind == "dataset_description" else CHUNK_TOKENS,
+                    line_boundaries=source_kind == "github" and bool(re.search(r"^\s*(`{3}|~{3})", text, re.M)))
                 for chunk_index, chunk in enumerate(chunks):
+                    search_metadata = {}
+                    if source_kind == "github":
+                        clean = markdown_search_text(chunk)
+                        if not re.search(r"\w", clean):
+                            continue
+                        search_metadata = {"search_text": f"{title}. {clean}",
+                                           "retrieval_text": f"{title}. {clean}",
+                                           "evidence_text": clean}
+                        if re.search(r"^\s*(`{3}|~{3})", text, re.M):
+                            search_metadata["evidence_text"] = f"{title}. {clean}"
                     if kind == "dataset_description":
                         chunk = "Bounded dataset description/sample, not a full analysis.\n" + chunk
                     source_id = sha256_text(f"{name}\n{key}\n{section_index}\n{chunk_index}")[:24]
@@ -359,14 +435,47 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
                         "location": f"{location}, passage {chunk_index + 1}",
                         "source_path": key, "content_hash": sha256_text(chunk),
                         "version": version, "imported_at": now, "scraped_at": None,
-                        "fetched_at": now if source_kind == "website" else None,
+                        "fetched_at": now if source_kind in {"website", "github"} else None,
+                        **metadata,
+                        **search_metadata,
                     })
             if not new_records:
                 raise ValueError("No searchable text found")
             records = [record for record in records if record.get("source_path") != key]
             records.extend(new_records)
             sources[key] = {"hash": digest, "version": version, "imported_at": now,
-                            "parser": parser_id, "kind": source_kind, "group": source_group}
+                            "parser": parser_id, "kind": source_kind, "group": source_group,
+                            **metadata}
+
+        if github:
+            files, complete, warnings = github_documents(source, max_pages, session)
+            messages.extend(warnings)
+            retained = set()
+            for key, digest, text, metadata in files:
+                try:
+                    replace_source(key, digest, markdown_sections(text, metadata["repository_path"], blockwise=True),
+                                   "github", source, metadata)
+                    retained.add(key)
+                except Exception as exc:
+                    complete = False
+                    messages.append(f"Skipped {key}: {exc}; previous records retained")
+            if complete:
+                deleted = {key for key, info in sources.items()
+                           if info.get("kind") == "github" and info.get("group") == source
+                           and key not in retained}
+                records = [record for record in records if record.get("source_path") not in deleted]
+                sources = {key: value for key, value in sources.items() if key not in deleted}
+                # Replace the old HTML listing only after a successful full import.
+                if retained and sources.get(source, {}).get("kind") == "website":
+                    records = [record for record in records if record.get("source_path") != source]
+                    sources.pop(source)
+            if not retained and not any(info.get("kind") == "github" and info.get("group") == source
+                                        for info in sources.values()):
+                raise ValueError("No readable GitHub documents were imported: " + "; ".join(messages))
+            result = {"name": name, "enabled": previous.get("enabled", True), "records": records,
+                      "sources": sources, "warnings": messages}
+            write_json(manifest_path, result)
+            return result
 
         if website:
             pages, retained, complete, crawl_messages = crawl_website(

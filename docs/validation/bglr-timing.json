@@ -1,0 +1,21 @@
+{
+  "baseline_ref": "b8671e2",
+  "before": {
+    "repo": "/private/tmp/ragpipe-bglr-before",
+    "samples": 160,
+    "startup_s": 1.3563500000018394,
+    "p50_ms": 46.20489599619759,
+    "p95_ms": 64.46670800505672,
+    "peak_rss_bytes": 490913792
+  },
+  "after": {
+    "repo": "/Users/rohanbanerjee/Projects/RAGpipe",
+    "samples": 160,
+    "startup_s": 0.12048574999789707,
+    "p50_ms": 46.02224999689497,
+    "p95_ms": 62.831250004819594,
+    "peak_rss_bytes": 594755584
+  },
+  "p95_regression": -0.025369032340054276,
+  "passed": true
+}

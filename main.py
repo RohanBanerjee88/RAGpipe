@@ -7,7 +7,7 @@ Decides between fast direct responses and LLaMA synthesis based on confidence
 from retriever import FAQRetriever
 from sanitized_response import format_response
 from prompt import get_llama_pipeline, is_llama_loaded, generate_llama_response
-from prompt import build_grounded_prompt
+from prompt import build_grounded_prompt, generation_input_budget, get_llama_task
 from grounding import (
     INSUFFICIENT_EVIDENCE,
     extractive_grounded_answer,
@@ -149,6 +149,8 @@ class SmartFAQAssistant:
         if route == "llama":
             if decision.get("multiple_collections"):
                 return evidence_excerpts(decision["context_faqs"], "multiple collections"), "extractive", confidence
+            if result.get("literal_definition") and result.get("raw_score", -100) >= 3:
+                return evidence_excerpts(decision["context_faqs"], "literal definition"), "extractive", confidence
             from model_setup import active_profile
             if active_profile().backend == "none":
                 sources = [source for source in decision.get("context_faqs", [result])
@@ -276,10 +278,14 @@ class SmartFAQAssistant:
         """
         context_faqs = self._normalize_context_faqs(context_faqs)
 
-        prompt, sources = build_grounded_prompt(user_query, context_faqs)
-        
         # Generate response
         try:
+            llm = get_llama_pipeline()
+            prompt, sources = build_grounded_prompt(
+                user_query, context_faqs, tokenizer=llm.tokenizer,
+                token_budget=generation_input_budget(llm, get_llama_task()))
+            if not sources:
+                return evidence_excerpts(context_faqs, "context_budget_exceeded"), "extractive_fallback"
             self.stats["generator_invocations"] += 1
             response = generate_llama_response(prompt, confidence_level=confidence)
             

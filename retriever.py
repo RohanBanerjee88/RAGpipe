@@ -128,7 +128,7 @@ class FAQRetriever:
         self.questions = [faq["question"] for faq in self.faqs]
         self.semantic_texts = [
             f"{faq['category']}. {faq['question']}" if faq.get("record_type") == "faq"
-            else f"{faq['title'][:120]}. {faq['text']}" for faq in self.faqs
+            else faq.get("retrieval_text") or f"{faq['title'][:120]}. {faq['text']}" for faq in self.faqs
         ]
         self.search_texts = [faq["search_text"] for faq in self.faqs]
         self.collection_bm25 = {
@@ -241,8 +241,9 @@ class FAQRetriever:
     def _has_sufficient_evidence(self, result):
         """Require an absolute semantic/cross signal or strong lexical evidence."""
         if result.get("record_type", "faq") != "faq":
-            return (result["raw_score"] >= 1.0 and result["bi_score"] >= 0.30
-                    and result["lexical_overlap_count"] >= 1)
+            corroborated = result["raw_score"] >= 1.0 and result["bi_score"] >= 0.30
+            strong_passage = result["raw_score"] >= 3.0 and result["bi_score"] >= 0.20
+            return (corroborated or strong_passage) and result["lexical_overlap_count"] >= 1
         semantic_evidence = result["bi_score"] >= EVIDENCE_GATE["min_bi_score"]
         cross_evidence = result["raw_score"] >= EVIDENCE_GATE["min_cross_raw_score"]
         lexical_evidence = (
@@ -251,6 +252,21 @@ class FAQRetriever:
             and result["lexical_overlap_count"] >= EVIDENCE_GATE["min_lexical_overlap_terms"]
         )
         return semantic_evidence or cross_evidence or lexical_evidence
+
+    def _definition_candidates(self, user_query, indices, limit=5):
+        """Rescue literal definitions when an unfamiliar entity embeds poorly."""
+        match = re.fullmatch(r"\s*(?:what (?:is|are)|define)\s+(.+?)[?!.]*\s*", user_query, re.I)
+        if not match:
+            return []
+        entity = re.sub(r"^(?:the|an?)\s+", "", match[1].strip(), flags=re.I).rstrip("?!. ")
+        if not entity:
+            return []
+        pattern = re.compile(r"^\s*(?:the\s+)?" + re.escape(entity)
+                             + r"\b(?:\s+(?:r-package|package|tool|system|model|method|protocol|framework|library|software|application|function|dataset))?"
+                             + r"(?:\s*\([^)]{0,100}\))?\s+(?:is|are|implements|refers to|stands for)\b", re.I)
+        found = [index for index in indices if self.faqs[index].get("record_type") != "faq"
+                 and pattern.search(self.faqs[index].get("evidence_text", self.faqs[index]["answer"]))]
+        return found[:limit]
 
     def _is_manipulative_query(self, user_query):
         """Reject requests to invent, override, or misrepresent source evidence."""
@@ -311,6 +327,7 @@ class FAQRetriever:
         semantic_ranking, bm25_ranking, fused_ranking = [], [], []
         bm25_scores, bm25_normalized = [0.0] * len(self.faqs), [0.0] * len(self.faqs)
         fused_scores = {}
+        definition_indices = set()
         for name, indices in self.collection_indices.items():
             local_bi = bi_scores[indices]
             semantic = [indices[i] for i in torch.topk(local_bi, min(SEMANTIC_TOP_K, len(indices))).indices.tolist()]
@@ -323,7 +340,14 @@ class FAQRetriever:
             semantic_ranking.extend(semantic)
             bm25_ranking.extend(keyword)
             fused_scores.update(fused)
-            fused_ranking.extend(sorted(fused, key=fused.get, reverse=True)[:HYBRID_CANDIDATE_K])
+            candidates = sorted(fused, key=fused.get, reverse=True)[:HYBRID_CANDIDATE_K]
+            definitions = self._definition_candidates(user_query, indices)
+            definition_indices.update(definitions)
+            for index in definitions:
+                if index not in candidates:
+                    candidates.append(index)
+                    fused_scores.setdefault(index, 0.0)
+            fused_ranking.extend(candidates)
         bi_scores = bi_scores.cpu().tolist()
 
         if self.debug:
@@ -335,7 +359,8 @@ class FAQRetriever:
         # STEP 2: Cross-encoder re-ranking of fused candidates
         # ====================================================================
         cross_inputs = [
-            (user_query, self.semantic_texts[index])
+            (user_query, self.semantic_texts[index] if self.faqs[index].get("record_type") == "faq"
+             else self.faqs[index].get("evidence_text", self.faqs[index]["answer"]))
             for index in fused_ranking
         ]
         cross_scores = self.cross_encoder.predict(cross_inputs)
@@ -417,6 +442,7 @@ class FAQRetriever:
             result = {
                 "collection": faq["collection"],
                 "record_type": faq.get("record_type", "faq"),
+                "literal_definition": candidate["faq_index"] in definition_indices,
                 "location": faq.get("location", ""),
                 "imported_at": faq.get("imported_at"),
                 "fetched_at": faq.get("fetched_at"),
@@ -551,6 +577,14 @@ class FAQRetriever:
             }
         
         best_match = results[0]
+        # Explicit code identifiers must occur in retrieved evidence, not just share a topic.
+        required = {match.group(0).strip("`").lower() for match in re.finditer(
+            r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b|`[^`]+`", user_query)}
+        if best_match.get("record_type") != "faq" and required:
+            evidence = "\n".join(r["matched_question"] + "\n" + r["matched_answer"] for r in results).lower()
+            if any(not re.search(r"(?<!\w)" + re.escape(identifier) + r"(?!\w)", evidence)
+                   for identifier in required):
+                return {"result": best_match, "route": "abstain", "reason": "missing_identifier_evidence"}
         if (best_match.get("record_type") != "faq" and
                 re.search(r"\b(calculate|compute|average|median|correlation|sum)\b", user_query, re.I)):
             return {"result": best_match, "route": "abstain", "reason": "dataset_analysis_not_supported"}
@@ -592,9 +626,13 @@ class FAQRetriever:
             }
 
         if best_match["needs_llama"]:
+            context = [r for r in results if r["evidence_sufficient"]]
+            if best_match.get("literal_definition") and not multi:
+                context = [r for r in context if r.get("literal_definition")
+                           and r["collection"] == best_match["collection"]]
             return {
                 "result": best_match,
-                "context_faqs": [r for r in results if r["evidence_sufficient"]][:3],
+                "context_faqs": context[:3],
                 "route": "llama",
                 "reason": f"confidence_{best_match['confidence']}"
             }

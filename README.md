@@ -149,6 +149,64 @@ authenticated sites, sitemaps with no reachable links, and browser sessions are
 not supported in this version. Start at the narrowest useful documentation URL
 instead of the site's home page for a cleaner, faster corpus.
 
+### Import GitHub Documentation
+
+GitHub folder pages are not ordinary documentation pages. The importer recognizes
+public `github.com/.../tree/...` and `.../blob/...` links, reads the actual
+Markdown/RMarkdown/plain-text files through GitHub's API and raw-file service,
+and pins citations to the resolved commit. It does not run R, Python, embedded
+commands, or notebook code. `--max-pages` limits text files for these imports.
+Images, scripts, binaries, and other assets are skipped and reported. API rate
+limits are reported with a local-checkout alternative.
+
+For the BGLR examples, use:
+
+```bash
+python main.py models prepare retrieval-only
+python main.py collections import bglr https://github.com/gdlc/BGLR-R/tree/master/inst/md --max-pages 50
+python main.py collections import bglr https://github.com/gdlc/BGLR-R/blob/master/README.md
+python main.py --offline --collection bglr --model retrieval-only
+```
+
+The second import is deliberate: the examples folder has technical procedures,
+while the repository README describes the package. Imports stay inside the
+requested path; they do not silently include the rest of a repository. Try
+`What is BGLR?`, `What types of censoring does BGLR support?`, and
+`Which function reads binary samples of effects in BGLR?`.
+
+Reimporting unchanged documents reuses embeddings and preserves versions.
+Content changes increment the source version; citations include the commit and
+line range. A failed or capped GitHub import retains previous documents. A
+complete successful import synchronizes deleted files in that requested path.
+It also replaces a legacy GitHub HTML directory listing in the same collection.
+ICER and other collections are left alone.
+
+Retrieval uses visible Markdown text rather than URL/badge noise, but original
+passage text is retained for citations. Empty headings and link-only navigation
+are excluded. Generation packs whole ranked passages into the selected model's
+input budget, with citation metadata displayed outside the prompt. Unsupported
+or ungrounded generation still falls back safely; a larger context window alone
+does not establish answer quality.
+Strong literal definitions return cited source excerpts without loading a
+generator. Explicit code identifiers absent from retrieved evidence cause an
+abstention rather than a generic answer about the same topic.
+
+To run the real-document smoke checks in a separate store:
+
+```bash
+python scripts/evaluate_bglr.py --data-dir /tmp/ragpipe-bglr-check --include-readme --output /tmp/bglr-retrieval.json
+python main.py models prepare flan-small
+python scripts/evaluate_bglr.py --data-dir /tmp/ragpipe-bglr-check --skip-import --include-readme --model flan-small --output /tmp/bglr-small.json
+python main.py models prepare flan-base
+python scripts/evaluate_bglr.py --data-dir /tmp/ragpipe-bglr-check --skip-import --include-readme --model flan-base --output /tmp/bglr-base.json
+python -m unittest discover -s tests -q
+```
+
+The first run downloads public documents, not model weights. Subsequent
+`--skip-import` runs are offline with prepared models. These BGLR questions are
+development smoke tests, not a held-out accuracy benchmark. Read
+the existing pull request for results and limitations.
+
 Tables create descriptions from filenames, sheets, column headers, and at most
 five sample rows. Formula cells are labeled without execution. Samples are not
 population summaries: calculations, statistics, and bioinformatics execution are

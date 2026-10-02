@@ -74,3 +74,45 @@ class CollectionRoutingTests(unittest.TestCase):
         valid, reason = validate_grounded_answer("Keep samples at -80 C. [S1]\nUse bleach.", 1, [result()])
         self.assertFalse(valid)
         self.assertEqual(reason, "uncited_claim")
+
+    def test_literal_definition_adds_candidates_not_forced_answers(self):
+        retriever = FAQRetriever.__new__(FAQRetriever)
+        retriever.faqs = [
+            {"record_type": "passage", "answer": "The ZETA Package implements sparse regression."},
+            {"record_type": "passage", "answer": "ZETA examples for parallel processing."},
+            {"record_type": "faq", "answer": "ZETA is a package."},
+            {"record_type": "passage", "answer": "ZETA assigns priors; the prior is Gaussian."},
+        ]
+        self.assertEqual(retriever._definition_candidates("What is ZETA?", [0, 1, 2, 3]), [0])
+        self.assertEqual(retriever._definition_candidates("How do I run ZETA?", [0, 1, 2]), [])
+        self.assertEqual(retriever._definition_candidates("What is OMEGA?", [0, 1, 2]), [])
+
+    def test_strong_body_rerank_can_corroborate_a_weak_embedding(self):
+        retriever = FAQRetriever.__new__(FAQRetriever)
+        evidence = {"record_type": "passage", "raw_score": 6.0, "bi_score": .29,
+                    "lexical_overlap_count": 1}
+        self.assertTrue(retriever._has_sufficient_evidence(evidence))
+        evidence["raw_score"] = .5
+        self.assertFalse(retriever._has_sufficient_evidence(evidence))
+
+    def test_definition_context_excludes_unrelated_code(self):
+        definition = {**result(answer="ZETA is a sparse regression package."), "literal_definition": True}
+        code = result(answer="run_parallel(ZETA)")
+        retriever = self.retriever([definition, code])
+        decision = retriever.get_best_match("What is ZETA?")
+        self.assertEqual(decision["context_faqs"], [definition])
+
+    def test_unknown_explicit_identifier_does_not_get_a_topic_only_answer(self):
+        retriever = self.retriever([result(answer="The package supports Gaussian priors.")])
+        self.assertEqual(retriever.get_best_match("Does it support UNKNOWN_PRIOR?")["route"], "abstain")
+        self.assertEqual(retriever.get_best_match("Does it support `unknownPrior`?")["route"], "abstain")
+        self.assertEqual(retriever.get_best_match("Does it support `Gaussian` priors?")["route"], "llama")
+
+    def test_strong_literal_definition_does_not_require_a_generator(self):
+        definition = {**result(answer="ZETA is a sparse regression package."), "literal_definition": True}
+        assistant = SmartFAQAssistant(debug=False, retriever=self.retriever([definition]))
+        with patch.object(assistant, "_load_llama_if_needed") as load:
+            answer, route, _ = assistant.get_answer("What is ZETA?")
+        load.assert_not_called()
+        self.assertEqual(route, "extractive")
+        self.assertIn("ZETA is a sparse regression package.", answer)
