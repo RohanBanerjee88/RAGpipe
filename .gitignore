@@ -1,5 +1,6 @@
 .env
 *.json
+!docs/validation/*.json
 
 .venv-codex/
 .venv/
@@ -7,3 +8,4 @@ venv/
 __pycache__/
 faq_embeddings.pt
 logs/
+.ragpipe/

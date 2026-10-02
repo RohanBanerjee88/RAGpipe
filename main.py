@@ -7,12 +7,13 @@ Decides between fast direct responses and LLaMA synthesis based on confidence
 from retriever import FAQRetriever
 from sanitized_response import format_response
 from prompt import get_llama_pipeline, is_llama_loaded, generate_llama_response
-from prompt import build_grounded_prompt
+from prompt import build_grounded_prompt, generation_input_budget, get_llama_task
 from grounding import (
     INSUFFICIENT_EVIDENCE,
     extractive_grounded_answer,
     format_sources,
     validate_grounded_answer,
+    evidence_excerpts,
 )
 from observability import trace_event
 from config import SUPPORT_LINK, ICER_DOCS_BASE, DEBUG_MODE
@@ -28,7 +29,7 @@ class SmartFAQAssistant:
     Intelligent FAQ assistant with adaptive routing
     """
     
-    def __init__(self, debug=None):
+    def __init__(self, debug=None, retriever=None):
         """
         Initialize the assistant
         
@@ -36,12 +37,16 @@ class SmartFAQAssistant:
             debug: Override DEBUG_MODE from config if specified
         """
         self.debug = debug if debug is not None else DEBUG_MODE
-        self.retriever = FAQRetriever(debug=self.debug)
+        self.retriever = retriever if retriever is not None else FAQRetriever(debug=self.debug)
         self.llama = None
+        self.pending_clarification = []
+        self.pending_clarification_query = ""
         self.stats = {
+            "clarified_queries": 0,
             "total_queries": 0,
             "direct_responses": 0,
             "llama_responses": 0,
+            "generator_invocations": 0,
             "abstained_queries": 0,
             "grounding_fallbacks": 0,
             "failed_queries": 0
@@ -84,17 +89,37 @@ class SmartFAQAssistant:
             print(f"{'='*60}")
         
         # Get routing decision from retriever
+        if self.pending_clarification and user_query.strip().isdigit():
+            number = int(user_query.strip())
+            if not 1 <= number <= len(self.pending_clarification):
+                return f"Choose a number from 1 to {len(self.pending_clarification)}, or ask a more specific question.", "clarify", "low"
+            selected = self.pending_clarification[number - 1]
+            self.pending_clarification = []
+            sources = self._reconstruct_context(self.pending_clarification_query, [selected])
+            self.pending_clarification_query = ""
+            return evidence_excerpts(sources, "selected source"), "extractive", "medium"
+        self.pending_clarification = []
+        self.pending_clarification_query = ""
         decision = self.retriever.get_best_match(user_query)
         
         # Handle no results
         if not decision['result']:
             self.stats["failed_queries"] += 1
-            answer = self._generate_no_match_response()
-            return answer, "no_match", "none"
+            return self._generate_insufficient_evidence_response(), "abstain", "none"
         
         result = decision['result']
         confidence = result['confidence']
         route = decision['route']
+        if route == "clarify":
+            self.stats["clarified_queries"] += 1
+            trace_event("routing", {"query": user_query, "route": route,
+                                     "reason": decision.get("reason"),
+                                     "source_ids": [r.get("source_id") for r in decision["context_faqs"]]})
+            self.pending_clarification = decision["context_faqs"]
+            self.pending_clarification_query = user_query
+            choices = "\n".join(f"{i}. {r['collection']}: {r['url']} ({r.get('location', '')}, version {r.get('version', 1)})"
+                                for i, r in enumerate(self.pending_clarification, 1))
+            return f"Several sources match. Which should I use?\n{choices}\nReply with a number for that source's excerpt, or ask a more specific question.", "clarify", confidence
 
         trace_event("routing", {
             "query": user_query,
@@ -127,6 +152,19 @@ class SmartFAQAssistant:
         
         # SLOW PATH: Medium/Low confidence - use tree search + LLaMA
         if route == "llama":
+            decision["context_faqs"] = self._reconstruct_context(
+                user_query, decision.get("context_faqs", [result]))
+            if any(source.get("context_incomplete") for source in decision.get("context_faqs", [])):
+                return evidence_excerpts(decision["context_faqs"], "incomplete_procedure_context"), "extractive", confidence
+            if decision.get("multiple_collections"):
+                return evidence_excerpts(decision["context_faqs"], "multiple collections"), "extractive", confidence
+            if result.get("literal_definition") and result.get("raw_score", -100) >= 3:
+                return evidence_excerpts(decision["context_faqs"], "literal definition"), "extractive", confidence
+            from model_setup import active_profile
+            if active_profile().backend == "none":
+                sources = [source for source in decision.get("context_faqs", [result])
+                           if source.get("evidence_sufficient")]
+                return evidence_excerpts(sources, "retrieval-only"), "extractive", confidence
             self.stats["llama_responses"] += 1
             
             if self.debug:
@@ -134,6 +172,11 @@ class SmartFAQAssistant:
             
             # Load LLaMA if needed
             if not self._load_llama_if_needed():
+                sources = [source for source in decision.get("context_faqs", [result])
+                           if source.get("evidence_sufficient") and
+                           (source.get("raw_score", -100) >= 1 or source.get("bi_score", 0) >= 0.4)]
+                if sources:
+                    return evidence_excerpts(sources), "extractive", confidence
                 if confidence == "medium":
                     if self.debug:
                         print("⚠️  Falling back to the supported FAQ match")
@@ -153,7 +196,7 @@ class SmartFAQAssistant:
             # Use tree search for better context (if enabled)
             from config import TREE_SEARCH_ENABLED, TREE_JSON_PATH
             
-            if TREE_SEARCH_ENABLED:
+            if TREE_SEARCH_ENABLED and result.get("collection", "icer") == "icer":
                 try:
                     # Lazy load tree searcher
                     if not hasattr(self, 'tree_searcher'):
@@ -230,6 +273,13 @@ class SmartFAQAssistant:
 
         raise RuntimeError(f"Unknown route: {route}")
     
+    def _reconstruct_context(self, query, matches):
+        if not getattr(self.retriever, "context_sources", None):
+            return matches
+        from evidence_context import reconstruct_context
+        return reconstruct_context(query, matches, self.retriever.context_sources,
+                                   self.retriever.bi_encoder.tokenizer)
+
     def _generate_llama_answer(self, user_query, context_faqs, confidence):
         """
         Generate answer using LLaMA with appropriate prompt
@@ -244,21 +294,25 @@ class SmartFAQAssistant:
         """
         context_faqs = self._normalize_context_faqs(context_faqs)
 
-        prompt, sources = build_grounded_prompt(user_query, context_faqs)
-        
         # Generate response
         try:
+            llm = get_llama_pipeline()
+            prompt, sources = build_grounded_prompt(
+                user_query, context_faqs, tokenizer=llm.tokenizer,
+                token_budget=generation_input_budget(llm, get_llama_task()))
+            if not sources:
+                return evidence_excerpts(context_faqs, "context_budget_exceeded"), "extractive_fallback"
+            self.stats["generator_invocations"] += 1
             response = generate_llama_response(prompt, confidence_level=confidence)
             
             if response is None:
                 raise Exception("LLaMA returned None")
 
-            valid, validation_reason = validate_grounded_answer(response, len(sources))
+            valid, validation_reason = validate_grounded_answer(response, len(sources), sources)
             if valid and INSUFFICIENT_EVIDENCE in response:
                 return self._generate_insufficient_evidence_response(), "abstain"
             if not valid:
-                fallback = extractive_grounded_answer(sources[0], validation_reason)
-                return f"{fallback}\n\n{format_sources(sources[:1])}", "extractive_fallback"
+                return evidence_excerpts(sources, validation_reason), "extractive_fallback"
 
             return f"{response}\n\n{format_sources(sources)}", "generated"
             
@@ -266,8 +320,7 @@ class SmartFAQAssistant:
             if self.debug:
                 print(f"❌ LLaMA generation failed: {e}")
             
-            fallback = extractive_grounded_answer(context_faqs[0], "generation_error")
-            return f"{fallback}\n\n{format_sources(context_faqs[:1])}", "extractive_fallback"
+            return evidence_excerpts(context_faqs, "generation_error"), "extractive_fallback"
 
     def _normalize_context_faqs(self, context_faqs):
         """
@@ -321,12 +374,10 @@ class SmartFAQAssistant:
     def _generate_insufficient_evidence_response(self):
         """Return a safe response without presenting an irrelevant closest match."""
         return f"""
-I could not find enough evidence in the indexed ICER documentation to answer this reliably.
+I could not find enough evidence in the selected collections to answer this reliably.
 
 No answer was generated because an unsupported answer would be less useful than an honest fallback.
 
-Support: {SUPPORT_LINK}
-Documentation: {ICER_DOCS_BASE}
         """.strip()
     
     def _generate_no_match_response(self):
@@ -361,6 +412,9 @@ I couldn't find relevant information in the ICER documentation for your question
         print(f"  Total Queries: {self.stats['total_queries']}")
         print(f"  Direct Responses (Fast): {self.stats['direct_responses']}")
         print(f"  LLaMA Responses (Slow): {self.stats['llama_responses']}")
+        print(f"  Generation Attempts: {self.stats['generator_invocations']}")
+        print(f"  Clarifications: {self.stats['clarified_queries']}")
+        print(f"  Abstentions: {self.stats['abstained_queries']}")
         print(f"  Failed Queries: {self.stats['failed_queries']}")
         
         if self.stats['total_queries'] > 0:
@@ -380,11 +434,11 @@ def run_cli():
     Interactive CLI for the smart FAQ assistant
     """
     print("\n" + "="*60)
-    print("💬 ICER Smart FAQ Assistant")
+    print("Collection Knowledge Assistant")
     print("="*60)
-    print("\nWelcome! I'll help you find answers from ICER documentation.")
-    print("I use FAST responses when confident, and SLOW (but accurate)")
-    print("LLaMA synthesis for complex or ambiguous questions.\n")
+    from model_setup import active_profile, model_status
+    profile = active_profile()
+    print(f"Model: {profile.name} | {model_status(profile)}")
     
     assistant = SmartFAQAssistant(debug=DEBUG_MODE)
     
@@ -401,7 +455,7 @@ def run_cli():
             
             # Handle exit
             if user_input.lower() in ["quit", "exit", "q"]:
-                print("\n👋 Thank you for using ICER FAQ Assistant!")
+                print("\nThank you for using Collection Knowledge Assistant!")
                 assistant.print_stats()
                 print("Goodbye! 🎓\n")
                 break
@@ -474,6 +528,9 @@ def run_cli():
 def main():
     """Main entry point"""
     try:
+        from terminal_setup import command_line
+        if command_line():
+            return
         run_cli()
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")

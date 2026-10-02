@@ -1,0 +1,1335 @@
+{
+  "description": "Development checks, not a held-out benchmark. Mock and real sources are labelled.",
+  "profiles": {
+    "flan-small": {
+      "model": "google/flan-t5-small",
+      "snapshot": "0fc9ddf78a1e988dac52e2dac162b0ede4fd74ab",
+      "task": "text2text-generation",
+      "device": "cpu",
+      "max_new_tokens": 512,
+      "load_s": 0.13134229100251105,
+      "generation_p50_ms": 1233.767458004877,
+      "generation_p95_ms": 12044.652417011093,
+      "checks": [
+        {
+          "query": "How is RNA concentration measured?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "unverified_claim_support",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 151,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 1233.767458004877,
+          "expected_facts": [
+            "RNA concentration is measured with Qubit fluorometry."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Where are extracted RNA specimens stored?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 154,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 847.0319579937495,
+          "expected_facts": [
+            "Extracted RNA specimens are stored at -80 C."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which aligner and reference are used?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 154,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 253.78933300089557,
+          "expected_facts": [
+            "STAR aligns reads to the GRCh38 reference genome."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "How do I validate and process the input?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "unknown_citation",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 181,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 9925.209540990181,
+          "expected_facts": [
+            "Do not run the process before validating the input.",
+            "```python\nvalidated = validate_input(path)\nif validated:\n    process_input(path)\n```"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which buffer should I use?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 150,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 9934.009167001932,
+          "expected_facts": [
+            "Do not use buffer X.",
+            "Use buffer Y instead."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "What is the sample storage temperature?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 157,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 144.65854100126307,
+          "expected_facts": [
+            "Lab A stores samples at -80 C.",
+            "Lab B stores samples at -20 C."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which GPU does the protocol support?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 150,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 425.41491700103506,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Does the protocol support the QUANTUM_TEST prior?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 155,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 12044.652417011093,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "What is the approved storage temperature?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 152,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 272.78554199438076,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "How do I save and read binary samples of effects in BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 512,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 8001.526790991193,
+          "expected_facts": [
+            "library(BGLR); data(mice)",
+            "saveEffects=TRUE",
+            "readBinMat('ETA_1_b.bin')"
+          ],
+          "required_code_blocks": 1,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_saveEffects.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd"
+          ]
+        },
+        {
+          "query": "How do I fit binary and ordinal traits with BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 503,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 4271.72762498958,
+          "expected_facts": [
+            "data(wheat)",
+            "yBin<-ifelse",
+            "yOrdinal=ifelse",
+            "response_type='ordinal'"
+          ],
+          "required_code_blocks": 2,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/categorical.md"
+          ]
+        },
+        {
+          "query": "What types of censoring does BGLR support?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 158,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 562.2149999981048,
+          "expected_facts": [
+            "BGLR supports right, left and interval censoring."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/censored.md"
+          ]
+        },
+        {
+          "query": "What does saveEnv do in BGLR2?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "unverified_claim_support",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 279,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 2,
+          "generation_ms": 2143.1429579970427,
+          "expected_facts": [
+            "snapshot of the environment"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/parallel.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/parallel.md"
+          ]
+        },
+        {
+          "query": "Which model cannot use heterogeneous error variances in BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 317,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 3,
+          "generation_ms": 179.0454169968143,
+          "expected_facts": [
+            "except RKHS"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md"
+          ]
+        }
+      ],
+      "raw_passes": 0,
+      "delivered_passes": 11,
+      "cases": 14,
+      "excerpt_fallbacks": 14
+    },
+    "flan-base": {
+      "model": "google/flan-t5-base",
+      "snapshot": "7bcac572ce56db69c1ea7c8af255c5d7c9672fc2",
+      "task": "text2text-generation",
+      "device": "cpu",
+      "max_new_tokens": 512,
+      "load_s": 0.19396991599933244,
+      "generation_p50_ms": 1805.6728749943431,
+      "generation_p95_ms": 43651.68474998791,
+      "checks": [
+        {
+          "query": "How is RNA concentration measured?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 151,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 9826.135790994158,
+          "expected_facts": [
+            "RNA concentration is measured with Qubit fluorometry."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Where are extracted RNA specimens stored?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 154,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 1805.6728749943431,
+          "expected_facts": [
+            "Extracted RNA specimens are stored at -80 C."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which aligner and reference are used?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 154,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 2917.5764999963576,
+          "expected_facts": [
+            "STAR aligns reads to the GRCh38 reference genome."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "How do I validate and process the input?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "empty_answer",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 181,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 43651.68474998791,
+          "expected_facts": [
+            "Do not run the process before validating the input.",
+            "```python\nvalidated = validate_input(path)\nif validated:\n    process_input(path)\n```"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which buffer should I use?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 150,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 1436.663958011195,
+          "expected_facts": [
+            "Do not use buffer X.",
+            "Use buffer Y instead."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "What is the sample storage temperature?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 157,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 499.82770800124854,
+          "expected_facts": [
+            "Lab A stores samples at -80 C.",
+            "Lab B stores samples at -20 C."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which GPU does the protocol support?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 150,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 464.26970801257994,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Does the protocol support the QUANTUM_TEST prior?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 155,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 387.1166250028182,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "What is the approved storage temperature?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 152,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 390.44650000869296,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "How do I save and read binary samples of effects in BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 512,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 9732.800291996682,
+          "expected_facts": [
+            "library(BGLR); data(mice)",
+            "saveEffects=TRUE",
+            "readBinMat('ETA_1_b.bin')"
+          ],
+          "required_code_blocks": 1,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_saveEffects.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd"
+          ]
+        },
+        {
+          "query": "How do I fit binary and ordinal traits with BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 503,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 21651.505249988986,
+          "expected_facts": [
+            "data(wheat)",
+            "yBin<-ifelse",
+            "yOrdinal=ifelse",
+            "response_type='ordinal'"
+          ],
+          "required_code_blocks": 2,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/categorical.md"
+          ]
+        },
+        {
+          "query": "What types of censoring does BGLR support?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 158,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 1,
+          "generation_ms": 1761.1426250077784,
+          "expected_facts": [
+            "BGLR supports right, left and interval censoring."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/censored.md"
+          ]
+        },
+        {
+          "query": "What does saveEnv do in BGLR2?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 279,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 2,
+          "generation_ms": 2301.1537909915205,
+          "expected_facts": [
+            "snapshot of the environment"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/parallel.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/parallel.md"
+          ]
+        },
+        {
+          "query": "Which model cannot use heterogeneous error variances in BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 317,
+          "generation_invoked": true,
+          "input_budget": 512,
+          "packed_sources": 3,
+          "generation_ms": 503.05745800142176,
+          "expected_facts": [
+            "except RKHS"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md"
+          ]
+        }
+      ],
+      "raw_passes": 0,
+      "delivered_passes": 11,
+      "cases": 14,
+      "excerpt_fallbacks": 14
+    },
+    "qwen-small": {
+      "model": "Qwen/Qwen2.5-0.5B-Instruct",
+      "snapshot": "7ae557604adf67be50417f59c2c2f167def9a775",
+      "task": "text-generation",
+      "device": "cpu",
+      "max_new_tokens": 512,
+      "load_s": 0.23762475000694394,
+      "generation_p50_ms": 1361.1690000107046,
+      "generation_p95_ms": 16986.242375001893,
+      "checks": [
+        {
+          "query": "How is RNA concentration measured?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 144,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 2469.06737498648,
+          "expected_facts": [
+            "RNA concentration is measured with Qubit fluorometry."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Where are extracted RNA specimens stored?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 147,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1010.075041995151,
+          "expected_facts": [
+            "Extracted RNA specimens are stored at -80 C."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which aligner and reference are used?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 149,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 970.3402500017546,
+          "expected_facts": [
+            "STAR aligns reads to the GRCh38 reference genome."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "How do I validate and process the input?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 166,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1173.7815420055995,
+          "expected_facts": [
+            "Do not run the process before validating the input.",
+            "```python\nvalidated = validate_input(path)\nif validated:\n    process_input(path)\n```"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which buffer should I use?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 145,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 984.2290419910569,
+          "expected_facts": [
+            "Do not use buffer X.",
+            "Use buffer Y instead."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "What is the sample storage temperature?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 155,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1361.1690000107046,
+          "expected_facts": [
+            "Lab A stores samples at -80 C.",
+            "Lab B stores samples at -20 C."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which GPU does the protocol support?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 146,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1141.3472080021165,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Does the protocol support the QUANTUM_TEST prior?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 146,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1344.9018749961397,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "What is the approved storage temperature?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 146,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 919.0786669933004,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "How do I save and read binary samples of effects in BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "uncited_code_block",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 999,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 3,
+          "generation_ms": 16986.242375001893,
+          "expected_facts": [
+            "library(BGLR); data(mice)",
+            "saveEffects=TRUE",
+            "readBinMat('ETA_1_b.bin')"
+          ],
+          "required_code_blocks": 1,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_saveEffects.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd"
+          ]
+        },
+        {
+          "query": "How do I fit binary and ordinal traits with BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 425,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 3642.3330420075217,
+          "expected_facts": [
+            "data(wheat)",
+            "yBin<-ifelse",
+            "yOrdinal=ifelse",
+            "response_type='ordinal'"
+          ],
+          "required_code_blocks": 2,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/categorical.md"
+          ]
+        },
+        {
+          "query": "What types of censoring does BGLR support?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 151,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1387.250916013727,
+          "expected_facts": [
+            "BGLR supports right, left and interval censoring."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/censored.md"
+          ]
+        },
+        {
+          "query": "What does saveEnv do in BGLR2?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "uncited_claim",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 244,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 2,
+          "generation_ms": 8272.585083002923,
+          "expected_facts": [
+            "snapshot of the environment"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/parallel.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/parallel.md"
+          ]
+        },
+        {
+          "query": "Which model cannot use heterogeneous error variances in BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 276,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 3,
+          "generation_ms": 2027.2357079957146,
+          "expected_facts": [
+            "except RKHS"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md"
+          ]
+        }
+      ],
+      "raw_passes": 0,
+      "delivered_passes": 11,
+      "cases": 14,
+      "excerpt_fallbacks": 14
+    },
+    "qwen-code-small": {
+      "model": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+      "snapshot": "ea3f2471cf1b1f0db85067f1ef93848e38e88c25",
+      "task": "text-generation",
+      "device": "cpu",
+      "max_new_tokens": 512,
+      "load_s": 0.23131454200483859,
+      "generation_p50_ms": 1718.8460829929681,
+      "generation_p95_ms": 25961.544874997344,
+      "checks": [
+        {
+          "query": "How is RNA concentration measured?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 144,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 2812.15687499207,
+          "expected_facts": [
+            "RNA concentration is measured with Qubit fluorometry."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Where are extracted RNA specimens stored?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "uncited_claim",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 147,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1841.040833009174,
+          "expected_facts": [
+            "Extracted RNA specimens are stored at -80 C."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which aligner and reference are used?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 149,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1440.120792001835,
+          "expected_facts": [
+            "STAR aligns reads to the GRCh38 reference genome."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "How do I validate and process the input?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 166,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1297.3164589930093,
+          "expected_facts": [
+            "Do not run the process before validating the input.",
+            "```python\nvalidated = validate_input(path)\nif validated:\n    process_input(path)\n```"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which buffer should I use?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 145,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1035.0444999930914,
+          "expected_facts": [
+            "Do not use buffer X.",
+            "Use buffer Y instead."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "What is the sample storage temperature?",
+          "kind": "mock",
+          "negative": false,
+          "validation": "uncited_claim",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 155,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1519.8727499955567,
+          "expected_facts": [
+            "Lab A stores samples at -80 C.",
+            "Lab B stores samples at -20 C."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Which GPU does the protocol support?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "uncited_claim",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 146,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1319.2797920055455,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "Does the protocol support the QUANTUM_TEST prior?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 146,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1019.16783300112,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "What is the approved storage temperature?",
+          "kind": "mock",
+          "negative": true,
+          "validation": "unverified_claim_support",
+          "raw_pass": false,
+          "delivered_pass": false,
+          "used_excerpt": true,
+          "prompt_tokens": 146,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 997.1944999997504,
+          "expected_facts": [],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": false,
+          "source_urls": [
+            "fixture:protocol"
+          ]
+        },
+        {
+          "query": "How do I save and read binary samples of effects in BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "unverified_code_support",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 999,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 3,
+          "generation_ms": 25961.544874997344,
+          "expected_facts": [
+            "library(BGLR); data(mice)",
+            "saveEffects=TRUE",
+            "readBinMat('ETA_1_b.bin')"
+          ],
+          "required_code_blocks": 1,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_saveEffects.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd"
+          ]
+        },
+        {
+          "query": "How do I fit binary and ordinal traits with BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 425,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 2747.3214579949854,
+          "expected_facts": [
+            "data(wheat)",
+            "yBin<-ifelse",
+            "yOrdinal=ifelse",
+            "response_type='ordinal'"
+          ],
+          "required_code_blocks": 2,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/categorical.md"
+          ]
+        },
+        {
+          "query": "What types of censoring does BGLR support?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "uncited_claim",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 151,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 1,
+          "generation_ms": 1767.5337920081802,
+          "expected_facts": [
+            "BGLR supports right, left and interval censoring."
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/censored.md"
+          ]
+        },
+        {
+          "query": "What does saveEnv do in BGLR2?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "missing_citations",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 244,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 2,
+          "generation_ms": 3017.966790997889,
+          "expected_facts": [
+            "snapshot of the environment"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/parallel.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/parallel.md"
+          ]
+        },
+        {
+          "query": "Which model cannot use heterogeneous error variances in BGLR?",
+          "kind": "real-bglr",
+          "negative": false,
+          "validation": "empty_answer_content",
+          "raw_pass": false,
+          "delivered_pass": true,
+          "used_excerpt": true,
+          "prompt_tokens": 276,
+          "generation_invoked": true,
+          "input_budget": 32256,
+          "packed_sources": 3,
+          "generation_ms": 1718.8460829929681,
+          "expected_facts": [
+            "except RKHS"
+          ],
+          "required_code_blocks": 0,
+          "excerpt_baseline_pass": true,
+          "source_urls": [
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md",
+            "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md"
+          ]
+        }
+      ],
+      "raw_passes": 0,
+      "delivered_passes": 11,
+      "cases": 14,
+      "excerpt_fallbacks": 14
+    }
+  },
+  "torch_version": "2.13.0",
+  "transformers_version": "4.57.6",
+  "peak_rss_bytes": 1345699840,
+  "interpretation": "All four profiles failed strict generator acceptance. The 11 supported cases were delivered through cited excerpts; the three model-only negative cases did not produce valid abstentions. The application-level BGLR evaluation separately abstained on all four unsupported queries before generation.",
+  "hardware": "Apple M3, 8 GB RAM, CPU; development evaluation, not a held-out benchmark",
+  "validation_policy": "Whole-sentence literal support; exact complete code blocks; citation-only or paraphrased claims do not count."
+}

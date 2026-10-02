@@ -1,0 +1,88 @@
+{
+  "cold_icer_startup_s": 0.39295037498231977,
+  "icer_warm": {
+    "p50_ms": 49.535708472831175,
+    "p95_ms": 76.94187498418614
+  },
+  "warm_p95_regression": -0.023607117880533046,
+  "cache_hit_ms": 0.3779169637709856,
+  "icer_with_labs": {
+    "cases": 32,
+    "failures": [],
+    "unsupported_answers": 0,
+    "pass_rate": 1.0,
+    "recall_at_5": 1.0,
+    "p50_ms": 140.808145981282,
+    "p95_ms": 210.8857500134036,
+    "llm_route_rate": 0.21875
+  },
+  "development": {
+    "cases": 5,
+    "failures": [],
+    "unsupported_answers": 0,
+    "pass_rate": 1.0,
+    "recall_at_5": 1.0,
+    "p50_ms": 152.53704105271026,
+    "p95_ms": 183.98545897798613,
+    "llm_route_rate": 0.6
+  },
+  "held_out": {
+    "cases": 21,
+    "failures": [],
+    "unsupported_answers": 0,
+    "pass_rate": 1.0,
+    "recall_at_5": 1.0,
+    "p50_ms": 143.71345803374425,
+    "p95_ms": 169.07758300658315,
+    "llm_route_rate": 0.6666666666666666
+  },
+  "growth_1000": {
+    "startup_s": 1.36480133398436,
+    "new_embeddings": 1000,
+    "icer": {
+      "cases": 32,
+      "failures": [],
+      "unsupported_answers": 0,
+      "pass_rate": 1.0,
+      "recall_at_5": 1.0,
+      "p50_ms": 387.7549374883529,
+      "p95_ms": 457.56325003458187,
+      "llm_route_rate": 0.21875
+    },
+    "lab": {
+      "cases": 21,
+      "failures": [],
+      "unsupported_answers": 0,
+      "pass_rate": 1.0,
+      "recall_at_5": 1.0,
+      "p50_ms": 382.9122920287773,
+      "p95_ms": 411.8956670281477,
+      "llm_route_rate": 0.6666666666666666
+    }
+  },
+  "growth_10000": {
+    "startup_s": 11.99035412503872,
+    "new_embeddings": 9000,
+    "icer": {
+      "cases": 32,
+      "failures": [],
+      "unsupported_answers": 0,
+      "pass_rate": 1.0,
+      "recall_at_5": 1.0,
+      "p50_ms": 421.82566699921153,
+      "p95_ms": 513.9224160229787,
+      "llm_route_rate": 0.21875
+    },
+    "lab": {
+      "cases": 21,
+      "failures": [],
+      "unsupported_answers": 0,
+      "pass_rate": 1.0,
+      "recall_at_5": 1.0,
+      "p50_ms": 426.15549999754876,
+      "p95_ms": 505.36037504207343,
+      "llm_route_rate": 0.6666666666666666
+    }
+  },
+  "peak_rss_bytes": 747241472
+}
