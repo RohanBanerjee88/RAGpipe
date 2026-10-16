@@ -57,6 +57,11 @@ from config import (
     DEBUG_MODE,
     USE_GPU
 )
+from config import DEFAULT_COLLECTION
+from routing_policy import (
+    required_identifiers, required_option_values, has_identifiers, requests_dataset_analysis,
+    source_manipulation_request, search_query_text,
+)
 
 
 @lru_cache(maxsize=4)
@@ -76,7 +81,7 @@ class FAQRetriever:
             debug: Override DEBUG_MODE from config if specified
         """
         self.debug = debug if debug is not None else DEBUG_MODE
-        self.collection = collection or os.getenv("FAQ_COLLECTION", "auto")
+        self.collection = collection or os.getenv("FAQ_COLLECTION", DEFAULT_COLLECTION)
         
         # Load FAQ data
         self._load_faqs()
@@ -272,15 +277,7 @@ class FAQRetriever:
 
     def _is_manipulative_query(self, user_query):
         """Reject requests to invent, override, or misrepresent source evidence."""
-        patterns = (
-            r"\bpretend\b.*\b(faq|documentation|source)\b",
-            r"\bmake up\b.*\b(faq|documentation|source)\b",
-            r"\bfabricate\b",
-            r"\bignore\b.*\b(documentation|evidence|source|instructions)\b",
-            r"\breveal\b.*\bsystem prompt\b",
-        )
-        lowered = user_query.lower()
-        return any(re.search(pattern, lowered) for pattern in patterns)
+        return source_manipulation_request(user_query)
 
     def find_top_k_faqs(self, user_query, k=None, return_all_candidates=False):
         """
@@ -313,14 +310,15 @@ class FAQRetriever:
         if self.debug:
             print(f"\n🔍 Searching for: '{user_query}'")
 
-        retrieval_query = expand_query(user_query)
+        search_query = search_query_text(user_query)
+        retrieval_query = expand_query(search_query)
 
         # ====================================================================
         # STEP 1: Independent semantic and BM25 retrieval
         # ====================================================================
         device = self.question_embeddings.device
         query_embedding = self.bi_encoder.encode(
-            user_query,
+            search_query,
             convert_to_tensor=True
         ).to(device)
 
@@ -361,7 +359,7 @@ class FAQRetriever:
         # STEP 2: Cross-encoder re-ranking of fused candidates
         # ====================================================================
         cross_inputs = [
-            (user_query, self.semantic_texts[index] if self.faqs[index].get("record_type") == "faq"
+            (search_query, self.semantic_texts[index] if self.faqs[index].get("record_type") == "faq"
              else self.faqs[index].get("evidence_text", self.faqs[index]["answer"]))
             for index in fused_ranking
         ]
@@ -499,7 +497,7 @@ class FAQRetriever:
         if len(self.collection_indices) > 1:
             grouped = {name: [r for r in results if r["collection"] == name] for name in self.collection_indices}
             def collection_score(name):
-                top = grouped[name][0]
+                top = next((r for r in grouped[name] if r["evidence_sufficient"]), grouped[name][0])
                 return (top["evidence_sufficient"], top["raw_score"] + 4 * top["bi_score"])
             order = sorted(grouped, key=collection_score, reverse=True)
             mentioned = [name for name in order if re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", user_query, re.I)]
@@ -582,22 +580,47 @@ class FAQRetriever:
             }
         
         best_match = results[0]
-        # Explicit code identifiers must occur in retrieved evidence, not just share a topic.
-        required = {match.group(0).strip("`").lower() for match in re.finditer(
-            r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b|`[^`]+`", user_query)}
-        if best_match.get("record_type") != "faq" and required:
-            evidence = "\n".join(r["matched_question"] + "\n" + r["matched_answer"] for r in results).lower()
-            if any(not re.search(r"(?<!\w)" + re.escape(identifier) + r"(?!\w)", evidence)
-                   for identifier in required):
-                return {"result": best_match, "route": "abstain", "reason": "missing_identifier_evidence"}
-        if (best_match.get("record_type") != "faq" and
-                re.search(r"\b(calculate|compute|average|median|correlation|sum)\b", user_query, re.I)):
-            return {"result": best_match, "route": "abstain", "reason": "dataset_analysis_not_supported"}
+        if self._is_manipulative_query(user_query):
+            return {"result": best_match, "route": "abstain", "reason": "source_manipulation_request"}
         supported = [r for r in results if r["evidence_sufficient"]]
+        if not best_match["evidence_sufficient"]:
+            # Legacy FAQ gates allow one signal; they are not strong enough for
+            # promoting a lower-ranked FAQ. Document gates require corroboration.
+            supported = [r for r in supported if r.get("record_type") != "faq"]
+        required = required_identifiers(user_query)
+        options = required_option_values(user_query)
+        if required or options:
+            # Never borrow an identifier from an unrelated or unsupported result.
+            matching = [r for r in supported if
+                         (r is best_match and r.get("record_type") == "faq")
+                         or has_identifiers(r, required, options)]
+            if not matching and getattr(self, "context_sources", None):
+                from evidence_context import reconstruct_context
+                expanded = reconstruct_context(user_query, supported, self.context_sources, self.bi_encoder.tokenizer)
+                matching = [r for r in expanded if not r.get("context_incomplete")
+                            and has_identifiers(r, required, options)]
+            supported = matching
+            if not matching:
+                return {"result": best_match, "route": "abstain", "reason": "missing_identifier_evidence"}
+        # A relative ranking winner may fail the evidence gate while a lower
+        # candidate passes it. Preserve explicit collection scope when recovering.
+        named = {name for name in {r["collection"] for r in results} if re.search(
+            r"(?<!\w)" + re.escape(name) + r"(?!\w)", user_query, re.I)}
+        multi = bool(re.search(r"\b(compare|both|across|versus)\b", user_query, re.I))
+        if len(named) == 1 and not multi:
+            supported = [r for r in supported if r["collection"] in named]
+        recovered = bool(supported) and supported[0] is not best_match
+        if not supported:
+            return {"result": best_match, "route": "abstain", "reason": "insufficient_evidence",
+                    "context_faqs": []}
+        best_match = supported[0]
+        if (best_match.get("record_type") != "faq" and requests_dataset_analysis(user_query)):
+            return {"result": best_match, "route": "abstain", "reason": "dataset_analysis_not_supported"}
+        refined = recovered or (best_match.get("record_type") != "faq" and (
+            bool(required) or bool(re.search(r"\b(calculate|compute|average|median|correlation|sum|fabricate|ignore)\b", user_query, re.I))))
         tops = {}
         for result in supported:
             tops.setdefault(result["collection"], result)
-        multi = bool(re.search(r"\b(compare|both|across|versus)\b", user_query, re.I))
         overlapping_sources = [r for r in supported
             if r["collection"] == best_match["collection"]
             and r["matched_question"].lower() == best_match["matched_question"].lower()
@@ -622,16 +645,8 @@ class FAQRetriever:
                 return {"result": first, "route": "llama", "reason": "multiple_collections",
                         "context_faqs": list(tops.values())[:5], "multiple_collections": True}
         
-        if not best_match["evidence_sufficient"]:
-            return {
-                "result": best_match,
-                "context_faqs": [r for r in results if r["evidence_sufficient"]][:3],
-                "route": "abstain",
-                "reason": "insufficient_evidence",
-            }
-
         if best_match["needs_llama"]:
-            context = [r for r in results if r["evidence_sufficient"]]
+            context = supported
             if best_match.get("literal_definition") and not multi:
                 context = [r for r in context if r.get("literal_definition")
                            and r["collection"] == best_match["collection"]]
@@ -639,7 +654,8 @@ class FAQRetriever:
                 "result": best_match,
                 "context_faqs": context[:3],
                 "route": "llama",
-                "reason": f"confidence_{best_match['confidence']}"
+                "reason": "supported_candidate_recovery" if recovered else f"confidence_{best_match['confidence']}",
+                "prefer_excerpts": refined,
             }
         else:
             return {

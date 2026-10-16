@@ -7,10 +7,9 @@ from urllib.parse import quote, unquote, urlsplit
 import requests
 
 from ingestion import sha256_text
+from config import WEB_TIMEOUT_SECONDS as TIMEOUT, WEB_MAX_BYTES as MAX_BYTES
 
 
-TIMEOUT = 15
-MAX_BYTES = 5 * 1024 * 1024
 TEXT_SUFFIXES = {".md", ".markdown", ".rmd", ".txt"}
 
 

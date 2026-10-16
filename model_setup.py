@@ -5,7 +5,10 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from config import BI_ENCODER_MODEL, CROSS_ENCODER_MODEL, PROJECT_ROOT
+from config import (
+    BI_ENCODER_MODEL, CROSS_ENCODER_MODEL, BI_ENCODER_REVISION, CROSS_ENCODER_REVISION,
+    MODEL_PROFILES_PATH, DEFAULT_GENERATION_PROFILE, PRIVATE_MODEL_PROFILES, OFFLINE_MODE,
+)
 from local_store import data_root, read_json, write_json
 
 
@@ -23,11 +26,11 @@ _offline = False
 
 
 def profiles():
-    path = Path(os.getenv("FAQ_MODELS_CONFIG", PROJECT_ROOT / "model_profiles.toml"))
+    path = Path(os.getenv("FAQ_MODELS_CONFIG", MODEL_PROFILES_PATH)).expanduser()
     with path.open("rb") as stream:
         config = tomllib.load(stream)
     result = {}
-    for name, values in config["models"].items():
+    for name, values in {**config["models"], **PRIVATE_MODEL_PROFILES}.items():
         profile = ModelProfile(name=name, **values)
         if profile.backend not in {"none", "transformers"}:
             raise ValueError(f"Unsupported backend for {name}: {profile.backend}")
@@ -37,7 +40,7 @@ def profiles():
                 type(profile.max_new_tokens) is not int or not 1 <= profile.max_new_tokens <= 4096):
             raise ValueError(f"Profile {name}: max_new_tokens must be an integer from 1 to 4096")
         result[name] = profile
-    return config.get("default", "flan-base"), result
+    return DEFAULT_GENERATION_PROFILE or config.get("default", "flan-base"), result
 
 
 def resolve_profile(selection=None):
@@ -50,7 +53,7 @@ def resolve_profile(selection=None):
 def configure_session(selection=None, offline=False):
     global _active, _offline
     _active = resolve_profile(selection)
-    _offline = offline or os.getenv("HF_HUB_OFFLINE", "0") == "1"
+    _offline = offline or os.getenv("HF_HUB_OFFLINE", "1" if OFFLINE_MODE else "0") == "1"
     if _offline:
         os.environ["HF_HUB_OFFLINE"] = "1"
     return _active
@@ -61,7 +64,7 @@ def active_profile():
 
 
 def offline_mode():
-    return _offline or os.getenv("HF_HUB_OFFLINE", "0") == "1"
+    return _offline or os.getenv("HF_HUB_OFFLINE", "1" if OFFLINE_MODE else "0") == "1"
 
 
 def save_selection(selection):
@@ -130,9 +133,13 @@ def generation_location():
         ) from exc
 
 
+def retrieval_revision(model):
+    return BI_ENCODER_REVISION if model == BI_ENCODER_MODEL else CROSS_ENCODER_REVISION
+
+
 def retrieval_location(model):
     try:
-        location = model_location(model)
+        location = model_location(model, retrieval_revision(model))
         check_weights(location)
         return location
     except Exception as exc:
@@ -158,7 +165,7 @@ def model_status(profile):
 def prepare_models(selection):
     from transformers import AutoConfig, AutoTokenizer
     profile = resolve_profile(selection)
-    required = [(BI_ENCODER_MODEL, "main"), (CROSS_ENCODER_MODEL, "main")]
+    required = [(BI_ENCODER_MODEL, BI_ENCODER_REVISION), (CROSS_ENCODER_MODEL, CROSS_ENCODER_REVISION)]
     if profile.backend != "none":
         required.append((profile.model, profile.revision))
     for model, revision in required:

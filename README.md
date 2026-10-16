@@ -18,6 +18,9 @@ selection, named model profiles, and explicit offline operation. Lab documents
 and dataset descriptions can be searched alongside ICER without merging their
 keyword statistics or embedding caches.
 
+For day-to-day setup, private settings, imports, and validation, see the
+[Operational User Guide](docs/USAGE.md).
+
 ## How It Works
 
 ```text
@@ -118,7 +121,7 @@ remote APIs, and models requiring custom executable code are not supported.
 Only one generator is loaded lazily per session. Restart to change it.
 
 Selection precedence is `--model`, `FAQ_LLM_MODEL`, the choice saved by `setup`,
-then the TOML default (`flan-base`). Hugging Face weights use its persistent cache
+private `models.default`, then the public TOML default (`flan-base`). Hugging Face weights use its persistent cache
 (`HF_HOME` can relocate it). Preparation records the resolved snapshot revision
 in `.ragpipe/prepared_models.json`. Missing generation weights allow source
 excerpts; missing retrieval weights require preparation before search.
@@ -420,11 +423,17 @@ the matching FAQ evidence. The final three must abstain.
 
 ## Model Configuration
 
-The default generation model is configured in `config.py`:
+The default generation profile is configured in `model_profiles.toml`.
+For owner-only settings without editing shared files, run:
 
-```python
-LLAMA_MODEL = "google/flan-t5-base"
+```bash
+python -m private_config init
+python -m private_config path
+python -m private_config check
 ```
+
+See the [operational guide](docs/USAGE.md#private-configuration) for supported
+settings, private model profiles, precedence, and the OS-account privacy boundary.
 
 Override it without changing source code when testing a smaller model or when
 an approved larger model is available:

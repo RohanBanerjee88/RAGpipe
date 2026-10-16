@@ -11,17 +11,13 @@ from urllib.robotparser import RobotFileParser
 
 from filelock import FileLock
 
-from config import FAQ_JSON_PATH
+from config import (FAQ_JSON_PATH, CHUNK_TOKENS, SAMPLE_ROWS, WEB_MAX_PAGES,
+                    WEB_TIMEOUT_SECONDS, WEB_MAX_BYTES)
 from ingestion import sha256_text, utc_now_iso
 from local_store import data_root, read_json, write_json
 
 
 SUPPORTED = {".pdf", ".md", ".txt", ".json", ".csv", ".tsv", ".xlsx"}
-CHUNK_TOKENS = 64
-SAMPLE_ROWS = 5
-WEB_MAX_PAGES = 50
-WEB_TIMEOUT_SECONDS = 15
-WEB_MAX_BYTES = 5 * 1024 * 1024
 WEB_USER_AGENT = "RAGpipe/1.0 (+local knowledge collection importer)"
 
 
@@ -349,7 +345,8 @@ def source_sections(path):
         with path.open(newline="", encoding="utf-8-sig") as stream:
             rows = csv.reader(stream, delimiter="\t" if suffix == ".tsv" else ",")
             text = dataset_card(path.name, "table", rows)
-            yield path.stem, "header and sample rows 2-6 (at most)", text, "dataset_description"
+            location = f"header and sample rows 2-{SAMPLE_ROWS + 1} (at most)" if SAMPLE_ROWS else "header only; no sample rows"
+            yield path.stem, location, text, "dataset_description"
     elif suffix == ".xlsx":
         from openpyxl import load_workbook
         workbook = load_workbook(path, read_only=True, data_only=False, keep_links=False)
@@ -359,7 +356,8 @@ def source_sections(path):
                     for row in sheet.iter_rows():
                         yield ["[formula not evaluated]" if cell.data_type == "f" else cell.value for cell in row]
                 text = dataset_card(path.name, sheet.title, safe_rows())
-                yield f"{path.stem}: {sheet.title}", f"sheet {sheet.title}, header and sample rows 2-6 (at most)", text, "dataset_description"
+                location = f"header and sample rows 2-{SAMPLE_ROWS + 1} (at most)" if SAMPLE_ROWS else "header only; no sample rows"
+                yield f"{path.stem}: {sheet.title}", f"sheet {sheet.title}, {location}", text, "dataset_description"
         finally:
             workbook.close()
     else:
@@ -396,6 +394,8 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
         github = website and github_target(source) is not None
         parser_kind = "github-markdown-v4" if github else "web-sections-v2" if website else "sentence-chunks-v5"
         parser_id = f"{parser_kind}:{CHUNK_TOKENS}:{getattr(tokenizer, 'name_or_path', 'custom')}"
+        if SAMPLE_ROWS != 5:
+            parser_id += f":sample_rows={SAMPLE_ROWS}"
 
         def replace_source(key, digest, sections, source_kind, source_group=None, metadata=None, raw_text=None):
             nonlocal records

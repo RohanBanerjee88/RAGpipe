@@ -1,9 +1,7 @@
 """Reconstruct bounded, source-local procedure context after passage retrieval."""
 
 import re
-
-
-MAX_CONTEXT_TOKENS = 1536
+from config import MAX_CONTEXT_TOKENS
 
 
 def procedure_query(query):
