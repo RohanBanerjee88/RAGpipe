@@ -2,6 +2,7 @@
 
 import argparse
 import os
+from config import DEFAULT_COLLECTION, WEB_MAX_PAGES
 
 from model_setup import (
     configure_session, model_status, prepare_models, profiles, save_selection,
@@ -12,9 +13,12 @@ def command_line():
     parser = argparse.ArgumentParser(description="Local collection knowledge assistant")
     parser.add_argument("--model", help="generation profile, Hub repository, or local directory")
     parser.add_argument("--offline", action="store_true", help="use local model files only")
-    parser.add_argument("--collection", default="auto", help="auto or one collection name")
+    parser.add_argument("--collection", help="auto or one collection name")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("setup", help="guided one-time model setup")
+    configuration = sub.add_parser("config", help="owner-only local settings").add_subparsers(dest="action", required=True)
+    for action in ("init", "path", "check"):
+        configuration.add_parser(action)
     models = sub.add_parser("models").add_subparsers(dest="action", required=True)
     models.add_parser("list")
     prepare = models.add_parser("prepare")
@@ -26,11 +30,16 @@ def command_line():
     importer = collections.add_parser("import")
     importer.add_argument("name")
     importer.add_argument("source", help="local file/directory, website, or GitHub tree/blob URL")
-    importer.add_argument("--max-pages", type=int, default=50,
-                          help="maximum website pages or GitHub text files (default: 50)")
+    importer.add_argument("--max-pages", type=int, default=WEB_MAX_PAGES,
+                          help="maximum website pages or GitHub text files")
+    importer.add_argument("--quiet", action="store_true", help="show a warning count instead of individual import warnings")
     args = parser.parse_args()
+    if args.command == "config":
+        from private_config import config_command
+        config_command(args.action)
+        return True
     configure_session(args.model, args.offline)
-    os.environ["FAQ_COLLECTION"] = args.collection
+    os.environ["FAQ_COLLECTION"] = args.collection or os.getenv("FAQ_COLLECTION", DEFAULT_COLLECTION)
     if args.command == "models":
         if args.action == "prepare":
             prepare_models(args.profile)
@@ -39,12 +48,12 @@ def command_line():
                 print(f"{profile.name}: {model_status(profile)} | {profile.model or 'source excerpts'}")
         return True
     if args.command == "setup":
-        available = profiles()[1]
+        default, available = profiles()
         for profile in available.values():
             print(f"{profile.name}: {model_status(profile)}")
-        selection = input("Profile [flan-base]: ").strip() or "flan-base"
+        selection = input(f"Profile [{default}]: ").strip() or default
         if selection not in available:
-            raise ValueError("Add a named profile to model_profiles.toml before guided setup")
+            raise ValueError("Add a named profile to model_profiles.toml or the private config before guided setup")
         prepare_models(selection)
         save_selection(selection)
         print("Saved. Start with: python main.py")
@@ -54,8 +63,14 @@ def command_line():
         if args.action == "import":
             result = import_collection(args.name, args.source, max_pages=args.max_pages)
             print(f"{result['name']}: {len(result['records'])} records")
-            for message in result.get("warnings", []):
-                print(f"Warning: {message}")
+            warnings = result.get("warnings", [])
+            if args.quiet and warnings:
+                print(f"{len(warnings)} warnings retained in the collection manifest; rerun without --quiet for details.")
+            elif warnings:
+                for message in warnings[:20]:
+                    print(f"Warning: {message}")
+                if len(warnings) > 20:
+                    print(f"{len(warnings) - 20} further warnings retained in the collection manifest.")
         elif args.action in {"enable", "disable"}:
             set_enabled(args.name, args.action == "enable")
             print(f"{args.name}: {args.action}d")

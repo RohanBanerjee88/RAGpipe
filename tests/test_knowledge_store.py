@@ -100,6 +100,22 @@ class ImportTests(unittest.TestCase):
         self.assertIn("Bounded sample only", text)
         self.assertNotIn("expression", text)
 
+    def test_changed_sample_setting_reimports_without_changing_the_source(self):
+        path = self.docs / "samples.csv"
+        path.write_text("id,x\nprivate-sample,42\n")
+        original = self.ingest()["records"][0]
+        with patch("knowledge_store.SAMPLE_ROWS", 0):
+            header = self.ingest()["records"][0]
+            self.assertEqual(header["version"], original["version"])
+            self.assertNotEqual(header["content_hash"], original["content_hash"])
+            self.assertNotIn("private-sample", header["text"])
+            self.assertIn("header only", header["location"])
+            self.assertEqual(header, self.ingest()["records"][0])
+        restored = self.ingest()["records"][0]
+        self.assertEqual(restored["version"], original["version"])
+        self.assertEqual(restored["content_hash"], original["content_hash"])
+        self.assertIn("private-sample", restored["text"])
+
     def test_workbook_formulas_are_never_evaluated(self):
         path = self.docs / "samples.xlsx"
         workbook = Workbook()

@@ -99,7 +99,7 @@ def get_llama_pipeline():
         _llama_device = device_selection.device
         if _llama_device == "cuda":
             pipeline_kwargs["device"] = 0
-            pipeline_kwargs["torch_dtype"] = torch.float16
+            pipeline_kwargs["dtype"] = torch.float16
         else:
             pipeline_kwargs["device"] = -1
 

@@ -49,6 +49,7 @@ class SmartFAQAssistant:
             "generator_invocations": 0,
             "abstained_queries": 0,
             "grounding_fallbacks": 0,
+            "refined_excerpts": 0,
             "failed_queries": 0
         }
         
@@ -112,6 +113,8 @@ class SmartFAQAssistant:
         route = decision['route']
         if route == "clarify":
             self.stats["clarified_queries"] += 1
+            if decision.get("clarification_message"):
+                return decision["clarification_message"], "clarify", confidence
             trace_event("routing", {"query": user_query, "route": route,
                                      "reason": decision.get("reason"),
                                      "source_ids": [r.get("source_id") for r in decision["context_faqs"]]})
@@ -156,6 +159,12 @@ class SmartFAQAssistant:
                 user_query, decision.get("context_faqs", [result]))
             if any(source.get("context_incomplete") for source in decision.get("context_faqs", [])):
                 return evidence_excerpts(decision["context_faqs"], "incomplete_procedure_context"), "extractive", confidence
+            if decision.get("prefer_excerpts"):
+                self.stats["refined_excerpts"] += 1
+                answer = evidence_excerpts(decision["context_faqs"], "supported source match")
+                if any(source.get("catalog") for source in decision["context_faqs"]):
+                    answer = "Model/example documentation listed by the source (not an exhaustive model inventory):\n\n" + answer
+                return answer, "extractive", confidence
             if decision.get("multiple_collections"):
                 return evidence_excerpts(decision["context_faqs"], "multiple collections"), "extractive", confidence
             if result.get("literal_definition") and result.get("raw_score", -100) >= 3:
@@ -413,6 +422,7 @@ I couldn't find relevant information in the ICER documentation for your question
         print(f"  Direct Responses (Fast): {self.stats['direct_responses']}")
         print(f"  LLaMA Responses (Slow): {self.stats['llama_responses']}")
         print(f"  Generation Attempts: {self.stats['generator_invocations']}")
+        print(f"  Refined Source Excerpts (No Generation): {self.stats['refined_excerpts']}")
         print(f"  Clarifications: {self.stats['clarified_queries']}")
         print(f"  Abstentions: {self.stats['abstained_queries']}")
         print(f"  Failed Queries: {self.stats['failed_queries']}")

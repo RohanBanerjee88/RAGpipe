@@ -9,3 +9,5 @@ __pycache__/
 faq_embeddings.pt
 logs/
 .ragpipe/
+config.private.toml
+*.private.toml
