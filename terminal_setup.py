@@ -32,6 +32,7 @@ def command_line():
     importer.add_argument("source", help="local file/directory, website, or GitHub tree/blob URL")
     importer.add_argument("--max-pages", type=int, default=WEB_MAX_PAGES,
                           help="maximum website pages or GitHub text files")
+    importer.add_argument("--quiet", action="store_true", help="show a warning count instead of individual import warnings")
     args = parser.parse_args()
     if args.command == "config":
         from private_config import config_command
@@ -62,8 +63,14 @@ def command_line():
         if args.action == "import":
             result = import_collection(args.name, args.source, max_pages=args.max_pages)
             print(f"{result['name']}: {len(result['records'])} records")
-            for message in result.get("warnings", []):
-                print(f"Warning: {message}")
+            warnings = result.get("warnings", [])
+            if args.quiet and warnings:
+                print(f"{len(warnings)} warnings retained in the collection manifest; rerun without --quiet for details.")
+            elif warnings:
+                for message in warnings[:20]:
+                    print(f"Warning: {message}")
+                if len(warnings) > 20:
+                    print(f"{len(warnings) - 20} further warnings retained in the collection manifest.")
         elif args.action in {"enable", "disable"}:
             set_enabled(args.name, args.action == "enable")
             print(f"{args.name}: {args.action}d")

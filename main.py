@@ -113,6 +113,8 @@ class SmartFAQAssistant:
         route = decision['route']
         if route == "clarify":
             self.stats["clarified_queries"] += 1
+            if decision.get("clarification_message"):
+                return decision["clarification_message"], "clarify", confidence
             trace_event("routing", {"query": user_query, "route": route,
                                      "reason": decision.get("reason"),
                                      "source_ids": [r.get("source_id") for r in decision["context_faqs"]]})
@@ -159,7 +161,10 @@ class SmartFAQAssistant:
                 return evidence_excerpts(decision["context_faqs"], "incomplete_procedure_context"), "extractive", confidence
             if decision.get("prefer_excerpts"):
                 self.stats["refined_excerpts"] += 1
-                return evidence_excerpts(decision["context_faqs"], "supported source match"), "extractive", confidence
+                answer = evidence_excerpts(decision["context_faqs"], "supported source match")
+                if any(source.get("catalog") for source in decision["context_faqs"]):
+                    answer = "Model/example documentation listed by the source (not an exhaustive model inventory):\n\n" + answer
+                return answer, "extractive", confidence
             if decision.get("multiple_collections"):
                 return evidence_excerpts(decision["context_faqs"], "multiple collections"), "extractive", confidence
             if result.get("literal_definition") and result.get("raw_score", -100) >= 3:

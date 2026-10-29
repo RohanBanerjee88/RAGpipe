@@ -10,7 +10,7 @@ import os
 import re
 import copy
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from functools import lru_cache
 from model_setup import retrieval_location
 from knowledge_store import list_collections
@@ -58,6 +58,7 @@ from config import (
     USE_GPU
 )
 from config import DEFAULT_COLLECTION
+from answer_relevance import focus_terms, contains_terms, example_query, entity_definition, model_values, overview_query
 from routing_policy import (
     required_identifiers, required_option_values, has_identifiers, requests_dataset_analysis,
     source_manipulation_request, search_query_text,
@@ -138,6 +139,21 @@ class FAQRetriever:
             else faq.get("retrieval_text") or f"{faq['title'][:120]}. {faq['text']}" for faq in self.faqs
         ]
         self.search_texts = [faq["search_text"] for faq in self.faqs]
+        self.model_values = set().union(*(model_values(faq["answer"]) for faq in self.faqs))
+        self.domain_terms = self.model_values | set(re.findall(r"\b[A-Z][A-Z0-9]{1,}\b", "\n".join(self.search_texts)))
+        self.collection_common_terms = {}
+        for name, indices in self.collection_indices.items():
+            counts = Counter(term.lower() for index in indices for term in set(
+                re.findall(r"(?<![A-Z])([A-Z]{2,})(?![A-Z])", self.search_texts[index])))
+            self.collection_common_terms[name] = {term for term, count in counts.items() if count / len(indices) >= .3}
+        self.section_text = {}
+        for key, source in self.context_sources.items():
+            groups = {}
+            for block in source.get("blocks", []):
+                groups.setdefault(block["group"], []).append(block["text"])
+            groups = {group: "\n".join(texts) for group, texts in groups.items()}
+            for index, block in enumerate(source.get("blocks", [])):
+                self.section_text[(*key, index)] = groups[block["group"]]
         self.collection_bm25 = {
             name: BM25Index(self.search_texts[index] for index in indices)
             for name, indices in self.collection_indices.items()
@@ -250,7 +266,12 @@ class FAQRetriever:
         if result.get("record_type", "faq") != "faq":
             corroborated = result["raw_score"] >= 1.0 and result["bi_score"] >= 0.30
             strong_passage = result["raw_score"] >= 3.0 and result["bi_score"] >= 0.20
-            return (corroborated or strong_passage) and result["lexical_overlap_count"] >= 1
+            # A mixed-topic passage can dilute its embedding despite a strong
+            # query/body rerank. Require independent literal body corroboration.
+            literal_body = (result["raw_score"] >= 3.0
+                            and result.get("body_lexical_coverage", 0) >= .5
+                            and result.get("body_lexical_overlap_count", 0) >= 3)
+            return (corroborated or strong_passage or literal_body) and result["lexical_overlap_count"] >= 1
         semantic_evidence = result["bi_score"] >= EVIDENCE_GATE["min_bi_score"]
         cross_evidence = result["raw_score"] >= EVIDENCE_GATE["min_cross_raw_score"]
         lexical_evidence = (
@@ -342,8 +363,9 @@ class FAQRetriever:
             fused_scores.update(fused)
             candidates = sorted(fused, key=fused.get, reverse=True)[:HYBRID_CANDIDATE_K]
             definitions = self._definition_candidates(user_query, indices)
+            catalogs = [index for index in indices if self.faqs[index].get("catalog")][:5] if overview_query(user_query) else []
             definition_indices.update(definitions)
-            for index in definitions:
+            for index in definitions + catalogs:
                 if index not in candidates:
                     candidates.append(index)
                     fused_scores.setdefault(index, 0.0)
@@ -411,6 +433,8 @@ class FAQRetriever:
                 "rrf_score": float(fused_scores[faq_index]),
                 "lexical_coverage": coverage,
                 "lexical_overlap_count": overlap_count,
+                "body_lexical_coverage": lexical_coverage(user_query, faq["answer"]) if faq.get("record_type") != "faq" else 0,
+                "body_lexical_overlap_count": lexical_overlap_count(user_query, faq["answer"]) if faq.get("record_type") != "faq" else 0,
                 "raw_score": float(raw_score),
                 "normalized_score": float(normalized_score),
                 "rerank_score": rerank_score,
@@ -442,6 +466,8 @@ class FAQRetriever:
             result = {
                 "collection": faq["collection"],
                 "record_type": faq.get("record_type", "faq"),
+                "code_passage": faq.get("code_passage", False),
+                "catalog": faq.get("catalog", False),
                 "literal_definition": candidate["faq_index"] in definition_indices,
                 "location": faq.get("location", ""),
                 "source_path": faq.get("source_path"),
@@ -457,6 +483,8 @@ class FAQRetriever:
                 "rrf_score": candidate["rrf_score"],
                 "lexical_coverage": candidate["lexical_coverage"],
                 "lexical_overlap_count": candidate["lexical_overlap_count"],
+                "body_lexical_coverage": candidate["body_lexical_coverage"],
+                "body_lexical_overlap_count": candidate["body_lexical_overlap_count"],
                 "normalized_score": candidate["normalized_score"],
                 "bi_score": candidate["bi_score"],
                 "score_gap": float(score_gap),
@@ -583,6 +611,43 @@ class FAQRetriever:
         if self._is_manipulative_query(user_query):
             return {"result": best_match, "route": "abstain", "reason": "source_manipulation_request"}
         supported = [r for r in results if r["evidence_sufficient"]]
+        def evidence_text(result, section=False):
+            source = getattr(self, "context_sources", {}).get((result["collection"], result.get("source_path")), {})
+            index = result.get("block_index")
+            if (isinstance(index, int) and 0 <= index < len(source.get("blocks", []))
+                    and source.get("version") == result.get("version")
+                    and source.get("source_revision") == result.get("source_revision")):
+                text = (getattr(self, "section_text", {}).get((result["collection"], result.get("source_path"), index))
+                        if section else None) or source["blocks"][index]["text"]
+                from knowledge_store import markdown_search_text
+                return result["matched_question"] + "\n" + markdown_search_text(text)
+            return result["matched_question"] + "\n" + result["matched_answer"]
+        terms = focus_terms(user_query, getattr(self, "domain_terms", ()))
+        terms -= {r["collection"].lower() for r in results}
+        # Technical entities must be in the answer evidence, not only in the
+        # platform name or an unrelated FAQ that happens to rank highly.
+        definition = entity_definition(user_query, terms)
+        supported = [r for r in supported if contains_terms(evidence_text(r, section=True), terms - (
+            set() if definition else getattr(self, "collection_common_terms", {}).get(r["collection"], set())))]
+        if re.search(r"\bsoftware\b", user_query, re.I):
+            supported = [r for r in supported if r.get("record_type") != "faq"
+                         or re.search(r"\bsoftware\b", r["matched_question"], re.I)]
+        from evidence_context import procedure_query
+        if not procedure_query(user_query):
+            supported = [r for r in supported if not r.get("code_passage")
+                         and not re.search(r"^\s*(`{3}|~{3})", r["matched_answer"], re.M)]
+        if overview_query(user_query):
+            supported = [r for r in supported if r.get("catalog")]
+        if definition:
+            canonical_query = re.sub(r"\W+", " ", user_query).strip().lower()
+            supported = [r for r in supported if r.get("literal_definition") or (
+                r.get("record_type") == "faq" and
+                re.sub(r"\W+", " ", r["matched_question"]).strip().lower() == canonical_query)]
+        requested_models = {value for value in getattr(self, "model_values", ()) if value.lower() in terms}
+        if example_query(user_query) and requested_models:
+            def implements_requested_model(result):
+                return requested_models.issubset(model_values(evidence_text(result)))
+            supported = [r for r in supported if implements_requested_model(r)]
         if not best_match["evidence_sufficient"]:
             # Legacy FAQ gates allow one signal; they are not strong enough for
             # promoting a lower-ranked FAQ. Document gates require corroboration.
@@ -611,13 +676,23 @@ class FAQRetriever:
             supported = [r for r in supported if r["collection"] in named]
         recovered = bool(supported) and supported[0] is not best_match
         if not supported:
+            # Suggest a unique adjacent-transposition acronym without silently
+            # changing a technical model name and returning the wrong example.
+            vocabulary = {term.upper() for term in getattr(self, "domain_terms", ())}
+            unknown = [term.upper() for term in terms if term.upper() not in vocabulary and term.isalpha()]
+            suggestions = {word for term in unknown for word in vocabulary if len(word) == len(term)
+                           and any(term[:i] + term[i + 1] + term[i] + term[i + 2:] == word
+                                   for i in range(len(term) - 1))}
+            if len(suggestions) == 1:
+                return {"result": best_match, "route": "clarify", "reason": "possible_technical_typo",
+                        "context_faqs": [], "clarification_message": f"Did you mean {next(iter(suggestions))}? Please confirm the model name in your question; I have not substituted another model."}
             return {"result": best_match, "route": "abstain", "reason": "insufficient_evidence",
                     "context_faqs": []}
         best_match = supported[0]
         if (best_match.get("record_type") != "faq" and requests_dataset_analysis(user_query)):
             return {"result": best_match, "route": "abstain", "reason": "dataset_analysis_not_supported"}
         refined = recovered or (best_match.get("record_type") != "faq" and (
-            bool(required) or bool(re.search(r"\b(calculate|compute|average|median|correlation|sum|fabricate|ignore)\b", user_query, re.I))))
+            bool(required) or overview_query(user_query) or bool(re.search(r"\b(calculate|compute|average|median|correlation|sum|fabricate|ignore)\b", user_query, re.I))))
         tops = {}
         for result in supported:
             tops.setdefault(result["collection"], result)

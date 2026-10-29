@@ -129,6 +129,8 @@ def format_sources(sources: Iterable[Dict]) -> str:
     lines = ["Sources:"]
     for index, faq in enumerate(sources, start=1):
         section = faq.get("section", faq.get("category", "General"))
+        if faq.get("record_type", "faq") == "faq" and faq.get("matched_question"):
+            section += " | Matched FAQ: " + faq["matched_question"]
         fetched = faq.get("fetched_at") or faq.get("scraped_at") or "unknown"
         version = faq.get("version", 1)
         lines.append(
@@ -158,6 +160,8 @@ def evidence_excerpts(sources, reason="generation_unavailable"):
         blocks.append("Evidence from separate collections; differences are not resolved automatically.")
     for index, source in enumerate(sources, 1):
         label = source.get("collection", "icer")
+        if source.get("record_type", "faq") == "faq" and source.get("matched_question"):
+            label += " | Matched FAQ: " + source["matched_question"]
         body = source.get("matched_answer", source.get("answer", ""))
         separator = "\n\n" if any(token.type == "fence" for token in MarkdownIt().parse(body)) else " "
         blocks.append(f"{label}:\n{body}{separator}[S{index}]")

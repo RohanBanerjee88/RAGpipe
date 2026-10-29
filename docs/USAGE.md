@@ -38,8 +38,8 @@ or corpus to follow these steps; choose another environment name if necessary.
 ```bash
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
-python3.11 -m venv .venv-codex
-source .venv-codex/bin/activate
+python3.11 -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python scripts/check_environment.py
@@ -349,6 +349,23 @@ python main.py collections import atlas /absolute/path/to/measurements.tsv
 python main.py collections import atlas /absolute/path/to/workbook.xlsx
 python main.py collections list
 ```
+
+Local repository imports skip Git metadata, virtual environments, dependency
+directories, and symlinked files/directories. Markdown comments such as `<!--kb`
+annotations and non-visible HTML are not answer evidence. After updating to this
+parser, reimport external Markdown/GitHub collections once and restart; ICER does
+not need rescraping. Reimporting a local repository also removes previously
+indexed records from the excluded internal directories.
+
+For a quieter import:
+
+```bash
+python main.py collections import atlas /path/to/docs --quiet
+```
+
+Warnings remain in the collection manifest; default terminal
+output shows at most 20 individual warnings. Quiet mode does not hide failures
+or imply that every file was read successfully.
 
 | Input | What is indexed |
 | --- | --- |

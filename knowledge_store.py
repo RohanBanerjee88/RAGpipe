@@ -17,7 +17,8 @@ from ingestion import sha256_text, utc_now_iso
 from local_store import data_root, read_json, write_json
 
 
-SUPPORTED = {".pdf", ".md", ".txt", ".json", ".csv", ".tsv", ".xlsx"}
+SUPPORTED = {".pdf", ".md", ".markdown", ".rmd", ".txt", ".json", ".csv", ".tsv", ".xlsx"}
+EXCLUDED_DIRECTORIES = {".git", ".hg", ".svn", ".venv", ".venv-codex", "venv", "node_modules", "__pycache__", ".ragpipe"}
 WEB_USER_AGENT = "RAGpipe/1.0 (+local knowledge collection importer)"
 
 
@@ -234,6 +235,15 @@ def token_chunks(text, tokenizer, limit=CHUNK_TOKENS, line_boundaries=False):
 
 def markdown_sections(text, filename, blockwise=False):
     from markdown_it import MarkdownIt
+    # Preserve line numbers while excluding non-visible annotations/instructions.
+    code_spans = [token.map for token in MarkdownIt().parse(text)
+                  if token.type in {"fence", "code_block"} and token.map]
+    def remove_comment(match):
+        line = text.count("\n", 0, match.start())
+        if any(start <= line < end for start, end in code_spans):
+            return match[0]
+        return "\n" * match[0].count("\n")
+    text = re.sub(r"<!--[\s\S]*?(?:-->|\Z)", remove_comment, text)
     lines = text.splitlines(keepends=True)
     tokens = MarkdownIt().parse(text)
     if not blockwise:
@@ -248,15 +258,19 @@ def markdown_sections(text, filename, blockwise=False):
                 yield title, f"lines {start + 1}-{end}", "".join(lines[start:end]).strip(), "passage"
         return
     title = filename
+    heading_titles = {}
     pending = None
     blocks = {"paragraph_open", "fence", "code_block", "bullet_list_open",
-              "ordered_list_open", "blockquote_open", "html_block"}
+              "ordered_list_open", "blockquote_open"}
     for index, token in enumerate(tokens):
         if token.level != 0 or not token.map:
             continue
         start, end = token.map
         if token.type == "heading_open":
             title = "".join(lines[start:end]).strip().lstrip("# ")
+            level = int(token.tag[1:])
+            heading_titles = {depth: name for depth, name in heading_titles.items() if depth < level}
+            heading_titles[level] = title
             pending = None
         elif token.type in blocks:
             body = "".join(lines[start:end]).strip()
@@ -273,7 +287,9 @@ def markdown_sections(text, filename, blockwise=False):
                             link_depth -= 1
                         elif child.type in {"text", "code_inline"} and not link_depth:
                             meaningful |= bool(re.search(r"\w", child.content))
-                if not meaningful:
+                catalog = token.type in {"bullet_list_open", "ordered_list_open"} and bool(re.search(
+                    r"\b(models?|examples?|methods?|tools?|software|protocols?|datasets?|instruments?)\b", " ".join(heading_titles.values()), re.I))
+                if not meaningful and not catalog:
                     continue
             # Bold subsection labels belong with their following content, not alone.
             if re.fullmatch(r"\*\*[^\n]+\*\*", body):
@@ -284,7 +300,8 @@ def markdown_sections(text, filename, blockwise=False):
                 body = "".join(lines[start:end]).strip()
                 pending = None
             if body:
-                yield title, f"lines {start + 1}-{end}", body, "passage"
+                section_title = " / ".join(heading_titles.values()) if token.type in {"bullet_list_open", "ordered_list_open"} else title
+                yield section_title, f"lines {start + 1}-{end}", body, "passage"
 
 
 def markdown_search_text(text):
@@ -299,6 +316,26 @@ def markdown_search_text(text):
         elif token.type in {"fence", "code_block"}:
             blocks.append(token.content)
     return "\n".join(blocks).strip()
+
+
+def model_catalog(title, text):
+    """Distinguish linked model/example inventories from script/navigation lists."""
+    if not re.search(r"\b(models?|examples?)\b", title, re.I):
+        return False
+    from markdown_it import MarkdownIt
+    labels = []
+    for token in MarkdownIt().parse(text):
+        label = None
+        for child in token.children or []:
+            if child.type == "link_open":
+                label = ""
+            elif child.type == "link_close" and label is not None:
+                labels.append(label)
+                label = None
+            elif label is not None and child.type in {"text", "code_inline"}:
+                label += child.content
+    return len(labels) >= 2 and any(re.search(r"\b(models?|regression)\b", label, re.I)
+                                  or re.search(r"\b[A-Z][A-Z0-9]{1,}\b", label) for label in labels)
 
 
 def dataset_card(filename, sheet, rows):
@@ -325,10 +362,9 @@ def source_sections(path):
             if not text.strip():
                 raise ValueError(f"Page {number} has no extractable text; OCR is not supported")
             yield path.stem, f"page {number}", text, "passage"
-    elif suffix == ".md":
+    elif suffix in {".md", ".markdown", ".rmd"}:
         text = path.read_text(encoding="utf-8-sig")
-        yield from markdown_sections(text, path.stem,
-                                     blockwise=bool(re.search(r"^\s*(`{3}|~{3})", text, re.M)))
+        yield from markdown_sections(text, path.stem, blockwise=True)
     elif suffix == ".txt":
         text = path.read_text(encoding="utf-8-sig")
         yield path.stem, f"lines 1-{len(text.splitlines())}", text, "passage"
@@ -383,16 +419,24 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(manifest_path) + ".lock"):
         previous = read_json(manifest_path, {"name": name, "records": [], "sources": {}})
-        files = [] if website else (
-            sorted(p for p in source.rglob("*") if p.is_file()) if source.is_dir() else [source]
-        )
+        if not website and source.is_dir():
+            import os
+            files = []
+            for directory, children, filenames in os.walk(source, followlinks=False):
+                children[:] = sorted(name for name in children if name not in EXCLUDED_DIRECTORIES
+                                     and not Path(directory, name).is_symlink())
+                files.extend(Path(directory, name) for name in sorted(filenames)
+                             if not Path(directory, name).is_symlink())
+            files.sort()
+        else:
+            files = [] if website else [source]
         records = list(previous["records"])
         sources = dict(previous.get("sources", {}))
         messages = []
         now = utc_now_iso()
         from github_documents import github_target, github_documents
         github = website and github_target(source) is not None
-        parser_kind = "github-markdown-v4" if github else "web-sections-v2" if website else "sentence-chunks-v5"
+        parser_kind = "github-markdown-v5" if github else "web-sections-v2" if website else "sentence-chunks-v6"
         parser_id = f"{parser_kind}:{CHUNK_TOKENS}:{getattr(tokenizer, 'name_or_path', 'custom')}"
         if SAMPLE_ROWS != 5:
             parser_id += f":sample_rows={SAMPLE_ROWS}"
@@ -416,26 +460,31 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
             new_records = []
             for section_index, (title, location, text, kind) in enumerate(sections):
                 # FAQ answers are canonical responses, not partial document excerpts.
-                chunks = [text] if kind == "faq" else token_chunks(
+                catalog = model_catalog(title, text)
+                chunks = [text] if kind == "faq" or catalog else token_chunks(
                     text, tokenizer, 160 if kind == "dataset_description" else CHUNK_TOKENS,
                     line_boundaries=source_kind == "github" and bool(re.search(r"^\s*(`{3}|~{3})", text, re.M)))
                 for chunk_index, chunk in enumerate(chunks):
                     search_metadata = {}
-                    if source_kind == "github":
+                    if source_kind == "github" or (source_kind == "file" and Path(key).suffix.lower() in {".md", ".markdown", ".rmd"}):
                         clean = markdown_search_text(chunk)
                         if not re.search(r"\w", clean):
                             continue
-                        search_metadata = {"search_text": f"{title}. {clean}",
-                                           "retrieval_text": f"{title}. {clean}",
+                        models = sorted(set(re.findall(r"\bmodel\s*=\s*['\"]([^'\"]+)['\"]", text)))
+                        labels = "; ".join(f"{value} model" for value in models)
+                        search_metadata = {"search_text": f"{title}. {labels}. {clean}",
+                                           "retrieval_text": f"{title}. {labels}. {clean}",
                                            "evidence_text": clean}
                         if re.search(r"^\s*(`{3}|~{3})", text, re.M):
-                            search_metadata["evidence_text"] = f"{title}. {clean}"
+                            search_metadata["evidence_text"] = f"{title}. {labels}. {clean}"
                     if kind == "dataset_description":
                         chunk = "Bounded dataset description/sample, not a full analysis.\n" + chunk
                     source_id = sha256_text(f"{name}\n{key}\n{section_index}\n{chunk_index}")[:24]
                     new_records.append({
                         "source_id": source_id, "collection": name, "record_type": kind,
                         "title": title, "text": chunk, "question": title, "answer": chunk,
+                        "code_passage": bool(re.search(r"^\s*(`{3}|~{3})", text, re.M)),
+                        "catalog": catalog,
                         "category": name, "section": title, "url": key,
                         "location": f"{location}, passage {chunk_index + 1}",
                         "source_path": key, "content_hash": sha256_text(chunk),
@@ -519,13 +568,15 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
                 continue
             try:
                 replace_source(key, digest, source_sections(path), "file",
-                               raw_text=path.read_text(encoding="utf-8-sig") if path.suffix.lower() == ".md" else None)
+                               raw_text=path.read_text(encoding="utf-8-sig") if path.suffix.lower() in {".md", ".markdown", ".rmd"} else None)
             except Exception as exc:
                 messages.append(f"Skipped {path.name}: {exc}; previous records retained")
                 continue
         # A directory reimport synchronizes deleted files in that directory only.
         if source.is_dir():
-            deleted = {key for key in sources if Path(key).is_relative_to(source) and not Path(key).exists()}
+            deleted = {key for key in sources if Path(key).is_relative_to(source) and (
+                not Path(key).exists() or Path(key).is_symlink()
+                or any(part in EXCLUDED_DIRECTORIES for part in Path(key).relative_to(source).parts[:-1]))}
             records = [record for record in records if record.get("source_path") not in deleted]
             sources = {key: value for key, value in sources.items() if key not in deleted}
         result = {"name": name, "enabled": previous.get("enabled", True), "records": records,

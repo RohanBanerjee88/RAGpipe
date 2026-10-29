@@ -2,10 +2,11 @@
 
 import re
 from config import MAX_CONTEXT_TOKENS
+from answer_relevance import example_query, focus_terms, model_values
 
 
 def procedure_query(query):
-    return bool(re.search(r"\b(how|steps?|procedure|commands?|scripts?|code|example|"
+    return bool(re.search(r"\b(how|steps?|procedure|commands?|scripts?|code|examples?|"
                           r"configure|install|run|fit|save|read)\b", query, re.I))
 
 
@@ -39,7 +40,7 @@ def context_blocks(sections, raw_text=None):
 
 def reconstruct_context(query, matches, sources, tokenizer, limit=MAX_CONTEXT_TOKENS):
     """Expand only supported anchors, never across files, headings, or revisions."""
-    if not procedure_query(query):
+    if not procedure_query(query) and not any(match.get("catalog") for match in matches):
         return matches
     result, seen = [], set()
     for match in matches:
@@ -66,12 +67,26 @@ def reconstruct_context(query, matches, sources, tokenizer, limit=MAX_CONTEXT_TO
         # Preserve the remaining steps too, including examples sharing setup.
         while end < len(blocks) and blocks[end]["group"] == group:
             end += 1
+        if match.get("catalog"):
+            start, end = index, index + 1
+        if example_query(query):
+            terms = focus_terms(query, set().union(*(model_values(block["text"]) for block in blocks[start:end])))
+            choices = [i for i in range(start, end) if blocks[i]["code"]
+                       and any(value.lower() in terms for value in model_values(blocks[i]["text"]))]
+            if choices:
+                # Return the earliest matching complete example and its preceding
+                # setup, not every alternative in a long tutorial section.
+                end = choices[0] + 1
         identity = (key, source.get("version"), source.get("source_revision"), start, end)
         if identity in seen:
             continue
         seen.add(identity)
         body = "\n\n".join(block["text"] for block in blocks[start:end])
-        encoded = tokenizer(body, add_special_tokens=False, truncation=False, verbose=False)
+        budget_text = body
+        if match.get("catalog"):
+            from knowledge_store import markdown_search_text
+            budget_text = markdown_search_text(body)
+        encoded = tokenizer(budget_text, add_special_tokens=False, truncation=False, verbose=False)
         size = len(encoded.get("input_ids", encoded.get("offset_mapping", [])))
         locations = [block["location"] for block in blocks[start:end]]
         spans = [re.fullmatch(r"lines (\d+)-(\d+)", location) for location in locations]
