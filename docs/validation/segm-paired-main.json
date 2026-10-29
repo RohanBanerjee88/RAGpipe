@@ -1,0 +1,8 @@
+{
+  "repo": "/private/tmp/ragpipe-segm-main-benchmark",
+  "samples": 160,
+  "startup_s": 0.24983987503219396,
+  "p50_ms": 48.53566701058298,
+  "p95_ms": 78.80216703051701,
+  "peak_rss_bytes": 643661824
+}

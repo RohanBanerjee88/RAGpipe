@@ -1,0 +1,185 @@
+{
+  "model": "retrieval-only",
+  "sources": 37,
+  "records": 743,
+  "warnings": [],
+  "revisions": [
+    "7e92aa2d835c6fef13c5f0e062863204964605f1"
+  ],
+  "retriever_construction_s": 0.354681790995528,
+  "new_embeddings": 0,
+  "cases": [
+    {
+      "query": "What is BGLR?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "expected_fact": "shrinkage and variable selection regression",
+      "expected_source_file": "README.md",
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/README.md"
+      ],
+      "route": "extractive",
+      "passed": true,
+      "uncached_retrieval_ms": 466.00720900460146,
+      "cached_route_and_answer_ms": 1.3807919895043597
+    },
+    {
+      "query": "What types of censoring does BGLR support?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "expected_fact": "right, left and interval censoring",
+      "expected_source_file": "censored.md",
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/censored.md"
+      ],
+      "route": "extractive",
+      "passed": true,
+      "uncached_retrieval_ms": 171.94033299165312,
+      "cached_route_and_answer_ms": 0.6315830105450004
+    },
+    {
+      "query": "Which function reads binary samples of effects in BGLR?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "expected_fact": "readBinMat",
+      "expected_source_file": "example_saveEffects.md",
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_saveEffects.md",
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/README.md",
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd"
+      ],
+      "route": "extractive",
+      "passed": true,
+      "uncached_retrieval_ms": 104.95624999748543,
+      "cached_route_and_answer_ms": 0.8386249974137172
+    },
+    {
+      "query": "Which model cannot use heterogeneous error variances in BGLR?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "expected_fact": "except RKHS",
+      "expected_source_file": "example_heteroskedastic.md",
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md",
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md",
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md"
+      ],
+      "route": "extractive",
+      "passed": true,
+      "uncached_retrieval_ms": 104.54924999794457,
+      "cached_route_and_answer_ms": 0.9024579921970144
+    },
+    {
+      "query": "What does saveEnv do in BGLR2?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "expected_fact": "snapshot of the environment",
+      "expected_source_file": "parallel.md",
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/parallel.md",
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/parallel.md"
+      ],
+      "route": "extractive",
+      "passed": true,
+      "uncached_retrieval_ms": 84.27154200035147,
+      "cached_route_and_answer_ms": 0.953417009441182
+    },
+    {
+      "query": "How do I fit binary and ordinal traits with BGLR?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "expected_fact": "response_type='ordinal'",
+      "expected_source_file": "categorical.md",
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/categorical.md",
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/categorical.md",
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/categorical.md"
+      ],
+      "route": "extractive",
+      "passed": true,
+      "uncached_retrieval_ms": 98.34554100234527,
+      "cached_route_and_answer_ms": 1.5365419967565686,
+      "procedure_complete": true,
+      "raw_passage_recall_at_5": true,
+      "recall_unit": "bounded reconstructed context from top-five passage anchors"
+    },
+    {
+      "query": "What is the emergency phone number for a lunar research station?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "expected_fact": null,
+      "expected_source_file": null,
+      "citation_urls": [],
+      "route": "abstain",
+      "passed": true,
+      "uncached_retrieval_ms": 95.43212500284426,
+      "cached_route_and_answer_ms": 0.4665000014938414
+    },
+    {
+      "query": "What medication dose should I prescribe for pneumonia?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "expected_fact": null,
+      "expected_source_file": null,
+      "citation_urls": [],
+      "route": "abstain",
+      "passed": true,
+      "uncached_retrieval_ms": 104.49433399480768,
+      "cached_route_and_answer_ms": 0.45737500477116555
+    },
+    {
+      "query": "Does BGLR support the QUANTUM_TEST prior?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "expected_fact": null,
+      "expected_source_file": null,
+      "citation_urls": [],
+      "route": "abstain",
+      "passed": true,
+      "uncached_retrieval_ms": 100.10279099515174,
+      "cached_route_and_answer_ms": 0.4802089970326051
+    },
+    {
+      "query": "Can BGLR run directly on H100 GPUs?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "expected_fact": null,
+      "expected_source_file": null,
+      "citation_urls": [],
+      "route": "abstain",
+      "passed": true,
+      "uncached_retrieval_ms": 100.7773330056807,
+      "cached_route_and_answer_ms": 0.4538339999271557
+    },
+    {
+      "query": "How do I save and read binary samples of effects in BGLR?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "expected_fact": "saveEffects=TRUE",
+      "expected_source_file": "example_saveEffects.md",
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_saveEffects.md",
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd",
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd"
+      ],
+      "route": "extractive",
+      "passed": true,
+      "uncached_retrieval_ms": 108.92495900043286,
+      "cached_route_and_answer_ms": 2.2329159983200952,
+      "procedure_complete": true,
+      "raw_passage_recall_at_5": false,
+      "recall_unit": "bounded reconstructed context from top-five passage anchors"
+    }
+  ],
+  "stats": {
+    "clarified_queries": 0,
+    "total_queries": 11,
+    "direct_responses": 0,
+    "llama_responses": 0,
+    "generator_invocations": 0,
+    "abstained_queries": 4,
+    "grounding_fallbacks": 0,
+    "failed_queries": 0
+  },
+  "passed": true
+}

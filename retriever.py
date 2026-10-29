@@ -10,7 +10,11 @@ import os
 import re
 import copy
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
+from functools import lru_cache
+from model_setup import retrieval_location
+from knowledge_store import list_collections
+from embedding_store import cached_embeddings, model_fingerprint
 from ingestion import content_hash, normalize_text, sha256_text, stable_source_id
 from hybrid_retrieval import (
     BM25Index,
@@ -53,10 +57,24 @@ from config import (
     DEBUG_MODE,
     USE_GPU
 )
+from config import DEFAULT_COLLECTION
+from answer_relevance import focus_terms, contains_terms, example_query, entity_definition, model_values, overview_query
+from routing_policy import (
+    required_identifiers, required_option_values, has_identifiers, requests_dataset_analysis,
+    source_manipulation_request, search_query_text,
+)
+
+
+@lru_cache(maxsize=4)
+def shared_models(bi_location, cross_location, device, bi_fingerprint, cross_fingerprint):
+    return (
+        SentenceTransformer(bi_location, device=device, local_files_only=True),
+        CrossEncoder(cross_location, device=device, local_files_only=True),
+    )
 
 
 class FAQRetriever:
-    def __init__(self, debug=None):
+    def __init__(self, debug=None, collection=None):
         """
         Initialize FAQ retriever with bi-encoder and cross-encoder models
         
@@ -64,6 +82,7 @@ class FAQRetriever:
             debug: Override DEBUG_MODE from config if specified
         """
         self.debug = debug if debug is not None else DEBUG_MODE
+        self.collection = collection or os.getenv("FAQ_COLLECTION", DEFAULT_COLLECTION)
         
         # Load FAQ data
         self._load_faqs()
@@ -83,21 +102,24 @@ class FAQRetriever:
         if self.debug:
             print(f"📂 Loading FAQs from {FAQ_JSON_PATH}...")
         
-        with open(FAQ_JSON_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        # Handle both old and new JSON formats
-        if "faqs" in data:
-            self.faqs = data["faqs"]
-            self.metadata = data.get("metadata", {})
-        else:
-            # Old format compatibility
-            self.faqs = data
-            self.metadata = {}
+        collections = list_collections()
+        if self.collection != "auto":
+            collections = [item for item in collections if item["name"] == self.collection]
+            if not collections:
+                raise ValueError(f"Collection {self.collection!r} is missing or empty")
+        self.faqs = [record for item in collections for record in item["records"]]
+        self.context_sources = {(item["name"], path): info for item in collections
+                                for path, info in item.get("sources", {}).items()}
+        if not self.faqs:
+            raise ValueError("No searchable collections. Run scrape.py or collections import first.")
+        self.metadata = {}
+        self.collection_indices = {}
+        for index, faq in enumerate(self.faqs):
+            self.collection_indices.setdefault(faq["collection"], []).append(index)
         
         for faq in self.faqs:
             faq["question"] = normalize_text(faq.get("question"))
-            faq["answer"] = normalize_text(faq.get("answer"))
+            faq["answer"] = faq.get("text", faq.get("answer", ""))
             faq["category"] = normalize_text(faq.get("category") or "General")
             faq["section"] = normalize_text(faq.get("section") or faq["category"])
             faq["search_text"] = normalize_text(
@@ -112,9 +134,30 @@ class FAQRetriever:
             faq["version"] = int(faq.get("version", 1))
 
         self.questions = [faq["question"] for faq in self.faqs]
-        self.semantic_texts = [f"{faq['category']}. {faq['question']}" for faq in self.faqs]
+        self.semantic_texts = [
+            f"{faq['category']}. {faq['question']}" if faq.get("record_type") == "faq"
+            else faq.get("retrieval_text") or f"{faq['title'][:120]}. {faq['text']}" for faq in self.faqs
+        ]
         self.search_texts = [faq["search_text"] for faq in self.faqs]
-        self.bm25 = BM25Index(self.search_texts)
+        self.model_values = set().union(*(model_values(faq["answer"]) for faq in self.faqs))
+        self.domain_terms = self.model_values | set(re.findall(r"\b[A-Z][A-Z0-9]{1,}\b", "\n".join(self.search_texts)))
+        self.collection_common_terms = {}
+        for name, indices in self.collection_indices.items():
+            counts = Counter(term.lower() for index in indices for term in set(
+                re.findall(r"(?<![A-Z])([A-Z]{2,})(?![A-Z])", self.search_texts[index])))
+            self.collection_common_terms[name] = {term for term, count in counts.items() if count / len(indices) >= .3}
+        self.section_text = {}
+        for key, source in self.context_sources.items():
+            groups = {}
+            for block in source.get("blocks", []):
+                groups.setdefault(block["group"], []).append(block["text"])
+            groups = {group: "\n".join(texts) for group, texts in groups.items()}
+            for index, block in enumerate(source.get("blocks", [])):
+                self.section_text[(*key, index)] = groups[block["group"]]
+        self.collection_bm25 = {
+            name: BM25Index(self.search_texts[index] for index in indices)
+            for name, indices in self.collection_indices.items()
+        }
         self.embedding_signature = sha256_text("\n".join(self.semantic_texts))
 
     def _load_models(self):
@@ -126,56 +169,30 @@ class FAQRetriever:
         self.device = self.device_selection.device
         if self.debug:
             print(f"🖥️  Model device: {self.device_selection.summary()}")
-        self.bi_encoder = SentenceTransformer(BI_ENCODER_MODEL, device=self.device)
+        bi_location = retrieval_location(BI_ENCODER_MODEL)
+        cross_location = retrieval_location(CROSS_ENCODER_MODEL)
+        self.model_fingerprint = model_fingerprint(bi_location)
+        self.bi_encoder, self.cross_encoder = shared_models(
+            bi_location, cross_location, self.device, self.model_fingerprint,
+            model_fingerprint(cross_location),
+        )
         
         if self.debug:
             print(f"🤖 Loading cross-encoder: {CROSS_ENCODER_MODEL}...")
         
-        self.cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL, device=self.device)
 
     def _load_embeddings(self):
         """Load or compute question embeddings"""
-        if os.path.exists(EMBEDDING_CACHE_PATH):
-            if self.debug:
-                print(f"⚡ Loading cached embeddings from {EMBEDDING_CACHE_PATH}...")
-            
-            cached = torch.load(EMBEDDING_CACHE_PATH, map_location=self.device)
-            if isinstance(cached, dict):
-                self.question_embeddings = cached.get("embeddings")
-                cached_signature = cached.get("signature")
-            else:
-                self.question_embeddings = cached
-                cached_signature = None
-
-            # Verify both corpus identity and embedding count. Count alone misses
-            # changed content with the same number of FAQs.
-            if (
-                self.question_embeddings is None
-                or len(self.question_embeddings) != len(self.semantic_texts)
-                or cached_signature != self.embedding_signature
-            ):
-                if self.debug:
-                    print("⚠️  Embedding cache is stale. Regenerating...")
-                self._generate_embeddings()
-        else:
-            if self.debug:
-                print("🔄 Generating new embeddings (this may take a moment)...")
-            self._generate_embeddings()
-
-    def _generate_embeddings(self):
-        """Generate and cache question embeddings"""
-        self.question_embeddings = self.bi_encoder.encode(
-            self.semantic_texts,
-            convert_to_tensor=True,
-            show_progress_bar=self.debug
-        )
-        torch.save({
-            "signature": self.embedding_signature,
-            "embeddings": self.question_embeddings,
-        }, EMBEDDING_CACHE_PATH)
-        
-        if self.debug:
-            print(f"💾 Embeddings cached to {EMBEDDING_CACHE_PATH}")
+        self.embedded_passages = 0
+        parts = []
+        for name, indices in self.collection_indices.items():
+            embeddings, count = cached_embeddings(
+                name, [self.semantic_texts[index] for index in indices], self.bi_encoder,
+                self.model_fingerprint, self.device,
+            )
+            parts.append(embeddings)
+            self.embedded_passages += count
+        self.question_embeddings = torch.cat(parts)
 
     def _normalize_scores(self, scores):
         """
@@ -213,95 +230,16 @@ class FAQRetriever:
         Returns:
             tuple: (confidence_level, needs_llama, signal_breakdown)
         """
-        # Evaluate each signal
-        signals_passed = 0
-        signal_details = {}
-        
-        # Signal 1: Bi-encoder semantic similarity
-        bi_good = bi_score >= BI_ENCODER_THRESHOLDS["good_match"]
-        signal_details["bi_encoder"] = {
-            "value": bi_score,
-            "passed": bi_good,
-            "threshold": BI_ENCODER_THRESHOLDS["good_match"]
+        # Confidence uses absolute pair scores; candidate-set normalization is ranking only.
+        details = {
+            "bi_encoder": {"value": bi_score, "passed": bi_score >= 0.60, "threshold": 0.60},
+            "cross_raw": {"value": raw_score, "passed": raw_score >= 3.0, "threshold": 3.0},
         }
-        if bi_good:
-            signals_passed += 1
-        
-        # Signal 2: Cross-encoder raw score
-        cross_raw_good = raw_score >= CROSS_ENCODER_RAW_THRESHOLDS["good"]
-        signal_details["cross_raw"] = {
-            "value": raw_score,
-            "passed": cross_raw_good,
-            "threshold": CROSS_ENCODER_RAW_THRESHOLDS["good"]
-        }
-        if cross_raw_good:
-            signals_passed += 1
-        
-        # Signal 3: Cross-encoder normalized score
-        cross_norm_good = normalized_score >= CROSS_ENCODER_NORMALIZED_THRESHOLDS["high"]
-        signal_details["cross_normalized"] = {
-            "value": normalized_score,
-            "passed": cross_norm_good,
-            "threshold": CROSS_ENCODER_NORMALIZED_THRESHOLDS["high"]
-        }
-        if cross_norm_good:
-            signals_passed += 1
-        
-        # Signal 4: Score gap (clear winner?)
-        gap_good = score_gap >= SCORE_GAP_THRESHOLDS["clear_winner"]
-        signal_details["score_gap"] = {
-            "value": score_gap,
-            "passed": gap_good,
-            "threshold": SCORE_GAP_THRESHOLDS["clear_winner"]
-        }
-        if gap_good:
-            signals_passed += 1
-
-        # Relative signals alone are not enough evidence for a match. When both
-        # absolute quality signals fail, the "best" candidate may simply be the
-        # least bad item in the shortlist.
-        absolute_match_plausible = bi_good or raw_score >= CROSS_ENCODER_RAW_THRESHOLDS["poor"]
-        if not absolute_match_plausible:
-            return "very_low", True, signal_details
-        
-        # Determine confidence level based on signals passed
-        if signals_passed >= ENSEMBLE_RULES["high"]:
-            confidence = "high"
-            needs_llama = False
-        elif signals_passed >= ENSEMBLE_RULES["medium"]:
-            confidence = "medium"
-            needs_llama = True
-        elif signals_passed >= ENSEMBLE_RULES["low"]:
-            confidence = "low"
-            needs_llama = True
-        else:
-            confidence = "very_low"
-            needs_llama = True
-        
-        return confidence, needs_llama, signal_details
-
-    def _get_confidence_level(self, normalized_score):
-        """
-        Legacy confidence scoring (kept for backward compatibility)
-        This is overridden by ensemble scoring when available
-        
-        Args:
-            normalized_score: Score between 0-1
-        
-        Returns:
-            tuple: (confidence_level, should_use_llama)
-        """
-        # Import legacy thresholds
-        from config import CONFIDENCE_THRESHOLDS
-        
-        if normalized_score >= CONFIDENCE_THRESHOLDS["high"]:
-            return "high", False
-        elif normalized_score >= CONFIDENCE_THRESHOLDS["medium"]:
-            return "medium", True
-        elif normalized_score >= CONFIDENCE_THRESHOLDS["low"]:
-            return "low", True
-        else:
-            return "very_low", True
+        if bi_score >= 0.60 and raw_score >= 3.0:
+            return "high", False, details
+        if bi_score >= 0.60 or raw_score >= 1.0:
+            return "medium", True, details
+        return "very_low", True, details
 
     def _lexical_rerank_boost(self, user_query, faq):
         """
@@ -325,6 +263,15 @@ class FAQRetriever:
 
     def _has_sufficient_evidence(self, result):
         """Require an absolute semantic/cross signal or strong lexical evidence."""
+        if result.get("record_type", "faq") != "faq":
+            corroborated = result["raw_score"] >= 1.0 and result["bi_score"] >= 0.30
+            strong_passage = result["raw_score"] >= 3.0 and result["bi_score"] >= 0.20
+            # A mixed-topic passage can dilute its embedding despite a strong
+            # query/body rerank. Require independent literal body corroboration.
+            literal_body = (result["raw_score"] >= 3.0
+                            and result.get("body_lexical_coverage", 0) >= .5
+                            and result.get("body_lexical_overlap_count", 0) >= 3)
+            return (corroborated or strong_passage or literal_body) and result["lexical_overlap_count"] >= 1
         semantic_evidence = result["bi_score"] >= EVIDENCE_GATE["min_bi_score"]
         cross_evidence = result["raw_score"] >= EVIDENCE_GATE["min_cross_raw_score"]
         lexical_evidence = (
@@ -334,17 +281,24 @@ class FAQRetriever:
         )
         return semantic_evidence or cross_evidence or lexical_evidence
 
+    def _definition_candidates(self, user_query, indices, limit=5):
+        """Rescue literal definitions when an unfamiliar entity embeds poorly."""
+        match = re.fullmatch(r"\s*(?:what (?:is|are)|define)\s+(.+?)[?!.]*\s*", user_query, re.I)
+        if not match:
+            return []
+        entity = re.sub(r"^(?:the|an?)\s+", "", match[1].strip(), flags=re.I).rstrip("?!. ")
+        if not entity:
+            return []
+        pattern = re.compile(r"^\s*(?:the\s+)?" + re.escape(entity)
+                             + r"\b(?:\s+(?:r-package|package|tool|system|model|method|protocol|framework|library|software|application|function|dataset))?"
+                             + r"(?:\s*\([^)]{0,100}\))?\s+(?:is|are|implements|refers to|stands for)\b", re.I)
+        found = [index for index in indices if self.faqs[index].get("record_type") != "faq"
+                 and pattern.search(self.faqs[index].get("evidence_text", self.faqs[index]["answer"]))]
+        return found[:limit]
+
     def _is_manipulative_query(self, user_query):
         """Reject requests to invent, override, or misrepresent source evidence."""
-        patterns = (
-            r"\bpretend\b.*\b(faq|documentation|source)\b",
-            r"\bmake up\b.*\b(faq|documentation|source)\b",
-            r"\bfabricate\b",
-            r"\bignore\b.*\b(documentation|evidence|source|instructions)\b",
-            r"\breveal\b.*\bsystem prompt\b",
-        )
-        lowered = user_query.lower()
-        return any(re.search(pattern, lowered) for pattern in patterns)
+        return source_manipulation_request(user_query)
 
     def find_top_k_faqs(self, user_query, k=None, return_all_candidates=False):
         """
@@ -377,41 +331,46 @@ class FAQRetriever:
         if self.debug:
             print(f"\n🔍 Searching for: '{user_query}'")
 
-        retrieval_query = expand_query(user_query)
+        search_query = search_query_text(user_query)
+        retrieval_query = expand_query(search_query)
 
         # ====================================================================
         # STEP 1: Independent semantic and BM25 retrieval
         # ====================================================================
         device = self.question_embeddings.device
         query_embedding = self.bi_encoder.encode(
-            user_query,
+            search_query,
             convert_to_tensor=True
         ).to(device)
 
         # Semantic ranking
         bi_scores = util.pytorch_cos_sim(query_embedding, self.question_embeddings)[0]
-        semantic_ranking = sorted(
-            range(len(self.faqs)),
-            key=lambda index: float(bi_scores[index]),
-            reverse=True,
-        )[:SEMANTIC_TOP_K]
-
-        # Lexical ranking
-        bm25_scores = self.bm25.scores(retrieval_query)
-        bm25_normalized = min_max_normalize(bm25_scores)
-        bm25_ranking = sorted(
-            range(len(self.faqs)),
-            key=lambda index: bm25_scores[index],
-            reverse=True,
-        )[:BM25_TOP_K]
-
-        # Rank fusion avoids pretending cosine and BM25 scores share a scale.
-        fused_scores = reciprocal_rank_fusion(
-            [semantic_ranking, bm25_ranking],
-            weights=[RRF_SEMANTIC_WEIGHT, RRF_BM25_WEIGHT],
-            rank_constant=RRF_RANK_CONSTANT,
-        )
-        fused_ranking = sorted(fused_scores, key=fused_scores.get, reverse=True)[:HYBRID_CANDIDATE_K]
+        semantic_ranking, bm25_ranking, fused_ranking = [], [], []
+        bm25_scores, bm25_normalized = [0.0] * len(self.faqs), [0.0] * len(self.faqs)
+        fused_scores = {}
+        definition_indices = set()
+        for name, indices in self.collection_indices.items():
+            local_bi = bi_scores[indices]
+            semantic = [indices[i] for i in torch.topk(local_bi, min(SEMANTIC_TOP_K, len(indices))).indices.tolist()]
+            lexical = self.collection_bm25[name].scores(retrieval_query)
+            normalized = min_max_normalize(lexical)
+            keyword = [indices[i] for i in sorted(range(len(indices)), key=lexical.__getitem__, reverse=True)[:BM25_TOP_K]]
+            for index, score, norm in zip(indices, lexical, normalized):
+                bm25_scores[index], bm25_normalized[index] = score, norm
+            fused = reciprocal_rank_fusion([semantic, keyword], weights=[RRF_SEMANTIC_WEIGHT, RRF_BM25_WEIGHT], rank_constant=RRF_RANK_CONSTANT)
+            semantic_ranking.extend(semantic)
+            bm25_ranking.extend(keyword)
+            fused_scores.update(fused)
+            candidates = sorted(fused, key=fused.get, reverse=True)[:HYBRID_CANDIDATE_K]
+            definitions = self._definition_candidates(user_query, indices)
+            catalogs = [index for index in indices if self.faqs[index].get("catalog")][:5] if overview_query(user_query) else []
+            definition_indices.update(definitions)
+            for index in definitions + catalogs:
+                if index not in candidates:
+                    candidates.append(index)
+                    fused_scores.setdefault(index, 0.0)
+            fused_ranking.extend(candidates)
+        bi_scores = bi_scores.cpu().tolist()
 
         if self.debug:
             print(f"  📊 Bi-encoder max score: {max(float(score) for score in bi_scores):.4f}")
@@ -422,7 +381,8 @@ class FAQRetriever:
         # STEP 2: Cross-encoder re-ranking of fused candidates
         # ====================================================================
         cross_inputs = [
-            (user_query, f"{self.faqs[index]['category']}. {self.faqs[index]['question']}")
+            (search_query, self.semantic_texts[index] if self.faqs[index].get("record_type") == "faq"
+             else self.faqs[index].get("evidence_text", self.faqs[index]["answer"]))
             for index in fused_ranking
         ]
         cross_scores = self.cross_encoder.predict(cross_inputs)
@@ -435,7 +395,12 @@ class FAQRetriever:
         # ====================================================================
         # STEP 3: Re-rank by cross-encoder, then score confidence
         # ====================================================================
-        normalized_scores = self._normalize_scores(cross_scores)
+        normalized_scores = [0.0] * len(cross_scores)
+        for name in self.collection_indices:
+            positions = [i for i, index in enumerate(fused_ranking) if self.faqs[index]["collection"] == name]
+            norms = self._normalize_scores([cross_scores[i] for i in positions])
+            for i, norm in zip(positions, norms):
+                normalized_scores[i] = norm
         reranked_candidates = []
 
         for faq_index, raw_score, normalized_score in zip(
@@ -468,6 +433,8 @@ class FAQRetriever:
                 "rrf_score": float(fused_scores[faq_index]),
                 "lexical_coverage": coverage,
                 "lexical_overlap_count": overlap_count,
+                "body_lexical_coverage": lexical_coverage(user_query, faq["answer"]) if faq.get("record_type") != "faq" else 0,
+                "body_lexical_overlap_count": lexical_overlap_count(user_query, faq["answer"]) if faq.get("record_type") != "faq" else 0,
                 "raw_score": float(raw_score),
                 "normalized_score": float(normalized_score),
                 "rerank_score": rerank_score,
@@ -497,6 +464,17 @@ class FAQRetriever:
 
             faq = candidate["faq"]
             result = {
+                "collection": faq["collection"],
+                "record_type": faq.get("record_type", "faq"),
+                "code_passage": faq.get("code_passage", False),
+                "catalog": faq.get("catalog", False),
+                "literal_definition": candidate["faq_index"] in definition_indices,
+                "location": faq.get("location", ""),
+                "source_path": faq.get("source_path"),
+                "source_revision": faq.get("source_revision"),
+                "block_index": faq.get("block_index"),
+                "imported_at": faq.get("imported_at"),
+                "fetched_at": faq.get("fetched_at"),
                 "raw_score": candidate["raw_score"],
                 "rerank_score": candidate["rerank_score"],
                 "rerank_boost": candidate["rerank_boost"],
@@ -505,6 +483,8 @@ class FAQRetriever:
                 "rrf_score": candidate["rrf_score"],
                 "lexical_coverage": candidate["lexical_coverage"],
                 "lexical_overlap_count": candidate["lexical_overlap_count"],
+                "body_lexical_coverage": candidate["body_lexical_coverage"],
+                "body_lexical_overlap_count": candidate["body_lexical_overlap_count"],
                 "normalized_score": candidate["normalized_score"],
                 "bi_score": candidate["bi_score"],
                 "score_gap": float(score_gap),
@@ -531,6 +511,9 @@ class FAQRetriever:
                 result["retrieval_consistency"],
             )
             result["evidence_sufficient"] = self._has_sufficient_evidence(result)
+            if result["record_type"] != "faq":
+                result["needs_llama"] = True
+                result["confidence"] = "medium" if result["evidence_sufficient"] else "very_low"
             if self._is_manipulative_query(user_query):
                 result["evidence_sufficient"] = False
                 result["evidence_rejection_reason"] = "source_manipulation_request"
@@ -538,6 +521,18 @@ class FAQRetriever:
             
             results.append(result)
         
+        # Preserve within-collection FAQ ranking, then select collections by absolute evidence.
+        if len(self.collection_indices) > 1:
+            grouped = {name: [r for r in results if r["collection"] == name] for name in self.collection_indices}
+            def collection_score(name):
+                top = next((r for r in grouped[name] if r["evidence_sufficient"]), grouped[name][0])
+                return (top["evidence_sufficient"], top["raw_score"] + 4 * top["bi_score"])
+            order = sorted(grouped, key=collection_score, reverse=True)
+            mentioned = [name for name in order if re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", user_query, re.I)]
+            if len(mentioned) == 1:
+                order = mentioned + [name for name in order if name not in mentioned]
+            results = [r for name in order for r in grouped[name]]
+
         # Debug output for ensemble signals (top result only)
         if self.debug and results and "ensemble_signals" in results[0]:
             print(f"\n  🎯 Ensemble Signals for Top Result:")
@@ -603,7 +598,7 @@ class FAQRetriever:
         Returns:
             dict with 'result' and 'route' ('direct' or 'llama')
         """
-        results = self.find_top_k_faqs(user_query, k=max(3, FINAL_TOP_K))
+        results = self.find_top_k_faqs(user_query, return_all_candidates=True)
         
         if not results:
             return {
@@ -613,21 +608,129 @@ class FAQRetriever:
             }
         
         best_match = results[0]
-        
+        if self._is_manipulative_query(user_query):
+            return {"result": best_match, "route": "abstain", "reason": "source_manipulation_request"}
+        supported = [r for r in results if r["evidence_sufficient"]]
+        def evidence_text(result, section=False):
+            source = getattr(self, "context_sources", {}).get((result["collection"], result.get("source_path")), {})
+            index = result.get("block_index")
+            if (isinstance(index, int) and 0 <= index < len(source.get("blocks", []))
+                    and source.get("version") == result.get("version")
+                    and source.get("source_revision") == result.get("source_revision")):
+                text = (getattr(self, "section_text", {}).get((result["collection"], result.get("source_path"), index))
+                        if section else None) or source["blocks"][index]["text"]
+                from knowledge_store import markdown_search_text
+                return result["matched_question"] + "\n" + markdown_search_text(text)
+            return result["matched_question"] + "\n" + result["matched_answer"]
+        terms = focus_terms(user_query, getattr(self, "domain_terms", ()))
+        terms -= {r["collection"].lower() for r in results}
+        # Technical entities must be in the answer evidence, not only in the
+        # platform name or an unrelated FAQ that happens to rank highly.
+        definition = entity_definition(user_query, terms)
+        supported = [r for r in supported if contains_terms(evidence_text(r, section=True), terms - (
+            set() if definition else getattr(self, "collection_common_terms", {}).get(r["collection"], set())))]
+        if re.search(r"\bsoftware\b", user_query, re.I):
+            supported = [r for r in supported if r.get("record_type") != "faq"
+                         or re.search(r"\bsoftware\b", r["matched_question"], re.I)]
+        from evidence_context import procedure_query
+        if not procedure_query(user_query):
+            supported = [r for r in supported if not r.get("code_passage")
+                         and not re.search(r"^\s*(`{3}|~{3})", r["matched_answer"], re.M)]
+        if overview_query(user_query):
+            supported = [r for r in supported if r.get("catalog")]
+        if definition:
+            canonical_query = re.sub(r"\W+", " ", user_query).strip().lower()
+            supported = [r for r in supported if r.get("literal_definition") or (
+                r.get("record_type") == "faq" and
+                re.sub(r"\W+", " ", r["matched_question"]).strip().lower() == canonical_query)]
+        requested_models = {value for value in getattr(self, "model_values", ()) if value.lower() in terms}
+        if example_query(user_query) and requested_models:
+            def implements_requested_model(result):
+                return requested_models.issubset(model_values(evidence_text(result)))
+            supported = [r for r in supported if implements_requested_model(r)]
         if not best_match["evidence_sufficient"]:
-            return {
-                "result": best_match,
-                "context_faqs": results[:3],
-                "route": "abstain",
-                "reason": "insufficient_evidence",
-            }
-
+            # Legacy FAQ gates allow one signal; they are not strong enough for
+            # promoting a lower-ranked FAQ. Document gates require corroboration.
+            supported = [r for r in supported if r.get("record_type") != "faq"]
+        required = required_identifiers(user_query)
+        options = required_option_values(user_query)
+        if required or options:
+            # Never borrow an identifier from an unrelated or unsupported result.
+            matching = [r for r in supported if
+                         (r is best_match and r.get("record_type") == "faq")
+                         or has_identifiers(r, required, options)]
+            if not matching and getattr(self, "context_sources", None):
+                from evidence_context import reconstruct_context
+                expanded = reconstruct_context(user_query, supported, self.context_sources, self.bi_encoder.tokenizer)
+                matching = [r for r in expanded if not r.get("context_incomplete")
+                            and has_identifiers(r, required, options)]
+            supported = matching
+            if not matching:
+                return {"result": best_match, "route": "abstain", "reason": "missing_identifier_evidence"}
+        # A relative ranking winner may fail the evidence gate while a lower
+        # candidate passes it. Preserve explicit collection scope when recovering.
+        named = {name for name in {r["collection"] for r in results} if re.search(
+            r"(?<!\w)" + re.escape(name) + r"(?!\w)", user_query, re.I)}
+        multi = bool(re.search(r"\b(compare|both|across|versus)\b", user_query, re.I))
+        if len(named) == 1 and not multi:
+            supported = [r for r in supported if r["collection"] in named]
+        recovered = bool(supported) and supported[0] is not best_match
+        if not supported:
+            # Suggest a unique adjacent-transposition acronym without silently
+            # changing a technical model name and returning the wrong example.
+            vocabulary = {term.upper() for term in getattr(self, "domain_terms", ())}
+            unknown = [term.upper() for term in terms if term.upper() not in vocabulary and term.isalpha()]
+            suggestions = {word for term in unknown for word in vocabulary if len(word) == len(term)
+                           and any(term[:i] + term[i + 1] + term[i] + term[i + 2:] == word
+                                   for i in range(len(term) - 1))}
+            if len(suggestions) == 1:
+                return {"result": best_match, "route": "clarify", "reason": "possible_technical_typo",
+                        "context_faqs": [], "clarification_message": f"Did you mean {next(iter(suggestions))}? Please confirm the model name in your question; I have not substituted another model."}
+            return {"result": best_match, "route": "abstain", "reason": "insufficient_evidence",
+                    "context_faqs": []}
+        best_match = supported[0]
+        if (best_match.get("record_type") != "faq" and requests_dataset_analysis(user_query)):
+            return {"result": best_match, "route": "abstain", "reason": "dataset_analysis_not_supported"}
+        refined = recovered or (best_match.get("record_type") != "faq" and (
+            bool(required) or overview_query(user_query) or bool(re.search(r"\b(calculate|compute|average|median|correlation|sum|fabricate|ignore)\b", user_query, re.I))))
+        tops = {}
+        for result in supported:
+            tops.setdefault(result["collection"], result)
+        overlapping_sources = [r for r in supported
+            if r["collection"] == best_match["collection"]
+            and r["matched_question"].lower() == best_match["matched_question"].lower()
+            and r["url"] != best_match["url"]
+            and r["matched_answer"] != best_match["matched_answer"]]
+        if overlapping_sources and not multi:
+            return {"result": best_match, "route": "clarify", "reason": "ambiguous_sources",
+                    "collections": [best_match["collection"]],
+                    "context_faqs": [best_match, overlapping_sources[0]]}
+        if len(tops) > 1:
+            first, second = list(tops.values())[:2]
+            ambiguous = abs((first["raw_score"] + 4 * first["bi_score"]) -
+                            (second["raw_score"] + 4 * second["bi_score"])) < 1.5
+            ambiguous |= (first["matched_question"].lower() == second["matched_question"].lower()
+                          and first["matched_answer"] != second["matched_answer"])
+            if any(re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", user_query, re.I) for name in tops):
+                ambiguous = False
+            if ambiguous and not multi:
+                return {"result": first, "route": "clarify", "reason": "ambiguous_collections",
+                        "collections": list(tops), "context_faqs": list(tops.values())[:5]}
+            if multi:
+                return {"result": first, "route": "llama", "reason": "multiple_collections",
+                        "context_faqs": list(tops.values())[:5], "multiple_collections": True}
+        
         if best_match["needs_llama"]:
+            context = supported
+            if best_match.get("literal_definition") and not multi:
+                context = [r for r in context if r.get("literal_definition")
+                           and r["collection"] == best_match["collection"]]
             return {
                 "result": best_match,
-                "context_faqs": results[:3],
+                "context_faqs": context[:3],
                 "route": "llama",
-                "reason": f"confidence_{best_match['confidence']}"
+                "reason": "supported_candidate_recovery" if recovered else f"confidence_{best_match['confidence']}",
+                "prefer_excerpts": refined,
             }
         else:
             return {
@@ -639,9 +742,13 @@ class FAQRetriever:
     def invalidate_cache(self):
         """Delete embedding cache to force regeneration"""
         self._result_cache.clear()
-        if os.path.exists(EMBEDDING_CACHE_PATH):
-            os.remove(EMBEDDING_CACHE_PATH)
-            print(f"🗑️  Deleted embedding cache: {EMBEDDING_CACHE_PATH}")
+        from local_store import data_root
+        from filelock import FileLock
+        for name in self.collection_indices:
+            path = data_root() / "collections" / name / "embeddings.pt"
+            with FileLock(str(path) + ".lock"):
+                path.unlink(missing_ok=True)
+        self._load_embeddings()
 
 
 # ============================================================================
