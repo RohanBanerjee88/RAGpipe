@@ -1,0 +1,65 @@
+{
+  "flan-small": {
+    "load_s": 0.23305749997962266,
+    "generation_p50_ms": 2411.8845419725403,
+    "generation_p95_ms": 4909.80441699503,
+    "checks": [
+      {
+        "query": "How is RNA concentration measured?",
+        "raw_answer": "",
+        "validation": "empty_answer",
+        "used_excerpt": true,
+        "answer_has_evidence": true,
+        "excerpt_baseline": "synthetic-lab:\nRNA concentration is measured with Qubit fluorometry. [S1]\n\nSource excerpts (baseline).\n\nSources:\n[S1] synthetic-lab | General | fixture:protocol | line 1 | retrieved unknown | version 1"
+      },
+      {
+        "query": "Where are extracted RNA specimens stored?",
+        "raw_answer": "Extracted RNA specimens are stored at -80 C. Section: General URL: fixture:protocol Collection: synthetic-lab Location: line 1 Retrieved: unknown Rules: 1. Use only facts explicitly stated in the evidence. 2. Do not use outside knowledge, assumptions, or invented steps. 3. Put an inline citation like [S1] after every factual claim. 4. Cite only source IDs that appear above. 5. If the evidence does not answer the question,",
+        "validation": "uncited_claim",
+        "used_excerpt": true,
+        "answer_has_evidence": true,
+        "excerpt_baseline": "synthetic-lab:\nExtracted RNA specimens are stored at -80 C. [S1]\n\nSource excerpts (baseline).\n\nSources:\n[S1] synthetic-lab | General | fixture:protocol | line 1 | retrieved unknown | version 1"
+      },
+      {
+        "query": "Which aligner and reference are used?",
+        "raw_answer": "STAR aligns reads to the GRCh38 reference genome. Section: General URL: fixture:protocol Collection: synthetic-lab Location: line 1 Retrieved: unknown Rules: 1. Use only facts explicitly stated in the evidence. 2. Do not use outside knowledge, assumptions, or invented steps. 3. Put an inline citation like [S1] after every factual claim. 4. Cite only source IDs that appear above. 5. If the evidence does not answer the question,",
+        "validation": "uncited_claim",
+        "used_excerpt": true,
+        "answer_has_evidence": true,
+        "excerpt_baseline": "synthetic-lab:\nSTAR aligns reads to the GRCh38 reference genome. [S1]\n\nSource excerpts (baseline).\n\nSources:\n[S1] synthetic-lab | General | fixture:protocol | line 1 | retrieved unknown | version 1"
+      }
+    ]
+  },
+  "flan-base": {
+    "load_s": 0.14323295903159305,
+    "generation_p50_ms": 12013.191583973821,
+    "generation_p95_ms": 19041.5933750337,
+    "checks": [
+      {
+        "query": "How is RNA concentration measured?",
+        "raw_answer": "RNA concentration is measured with Qubit fluorometry. Section: General URL: fixture:protocol Collection: synthetic-lab Location: line 1 Retrieved: unknown Rules: 1. Use only facts explicitly stated in the evidence. 2. Do not use outside knowledge, assumptions, or invented steps. 3. Put an inline citation like [S1] after every factual claim. 4. Cite only source IDs that appear above. 5. If the evidence does not answer the question, the INSUFFICIENT_EVIDENCE is [S1]. 6. Keep the answer concise and practical.",
+        "validation": "uncited_claim",
+        "used_excerpt": true,
+        "answer_has_evidence": true,
+        "excerpt_baseline": "synthetic-lab:\nRNA concentration is measured with Qubit fluorometry. [S1]\n\nSource excerpts (baseline).\n\nSources:\n[S1] synthetic-lab | General | fixture:protocol | line 1 | retrieved unknown | version 1"
+      },
+      {
+        "query": "Where are extracted RNA specimens stored?",
+        "raw_answer": "Extracted RNA specimens are stored at -80 C. Section: General URL: fixture:protocol Collection: synthetic-lab Location: line 1 Retrieved: unknown Rules: 1. Use only facts explicitly stated in the evidence. 2. Do not use outside knowledge, assumptions, or invented steps. 3. Put an inline citation like [S1] after every factual claim. 4. Cite only source IDs that appear above. 5. If the evidence does not answer the question, the answer is the INSUFFICIENT_EVIDENCE. 6. Keep the answer concise and practical.",
+        "validation": "uncited_claim",
+        "used_excerpt": true,
+        "answer_has_evidence": true,
+        "excerpt_baseline": "synthetic-lab:\nExtracted RNA specimens are stored at -80 C. [S1]\n\nSource excerpts (baseline).\n\nSources:\n[S1] synthetic-lab | General | fixture:protocol | line 1 | retrieved unknown | version 1"
+      },
+      {
+        "query": "Which aligner and reference are used?",
+        "raw_answer": "STAR aligns reads to the GRCh38 reference genome. Section: General URL: fixture:protocol Collection: synthetic-lab Location: line 1 Retrieved: unknown",
+        "validation": "missing_citations",
+        "used_excerpt": true,
+        "answer_has_evidence": true,
+        "excerpt_baseline": "synthetic-lab:\nSTAR aligns reads to the GRCh38 reference genome. [S1]\n\nSource excerpts (baseline).\n\nSources:\n[S1] synthetic-lab | General | fixture:protocol | line 1 | retrieved unknown | version 1"
+      }
+    ]
+  },
+  "peak_rss_bytes": 1007370240
+}

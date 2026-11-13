@@ -1,0 +1,176 @@
+{
+  "model": "flan-small",
+  "sources": 37,
+  "records": 743,
+  "warnings": [],
+  "revisions": [
+    "7e92aa2d835c6fef13c5f0e062863204964605f1"
+  ],
+  "retriever_construction_s": 0.929118334010127,
+  "new_embeddings": 0,
+  "cases": [
+    {
+      "query": "What is BGLR?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "route": "extractive",
+      "passed": true,
+      "uncached_retrieval_ms": 1538.1171250046464,
+      "cached_route_and_answer_ms": 0.4797080036951229,
+      "prompt_tokens": 168,
+      "input_budget": 512,
+      "packed_sources": 1,
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/README.md"
+      ],
+      "expected_fact": "shrinkage and variable selection regression",
+      "expected_source_file": "README.md"
+    },
+    {
+      "query": "What types of censoring does BGLR support?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "route": "llama",
+      "passed": true,
+      "uncached_retrieval_ms": 105.69379200751428,
+      "cached_route_and_answer_ms": 797.2100420010975,
+      "prompt_tokens": 122,
+      "input_budget": 512,
+      "packed_sources": 1,
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/censored.md"
+      ],
+      "expected_fact": "right, left and interval censoring",
+      "expected_source_file": "censored.md"
+    },
+    {
+      "query": "Which function reads binary samples of effects in BGLR?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "route": "llama",
+      "passed": true,
+      "uncached_retrieval_ms": 71.52066600974649,
+      "cached_route_and_answer_ms": 3463.949708995642,
+      "prompt_tokens": 248,
+      "input_budget": 512,
+      "packed_sources": 3,
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_saveEffects.md",
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/README.md",
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/SupplementaryFileS2_SCRIPTS.Rmd"
+      ],
+      "expected_fact": "readBinMat",
+      "expected_source_file": "example_saveEffects.md"
+    },
+    {
+      "query": "Which model cannot use heterogeneous error variances in BGLR?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "route": "llama",
+      "passed": true,
+      "uncached_retrieval_ms": 101.62387500167824,
+      "cached_route_and_answer_ms": 383.78508400637656,
+      "prompt_tokens": 281,
+      "input_budget": 512,
+      "packed_sources": 3,
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/example_heteroskedastic.md"
+      ],
+      "expected_fact": "except RKHS",
+      "expected_source_file": "example_heteroskedastic.md"
+    },
+    {
+      "query": "What does saveEnv do in BGLR2?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "route": "llama",
+      "passed": true,
+      "uncached_retrieval_ms": 191.5789170016069,
+      "cached_route_and_answer_ms": 2188.06670801132,
+      "prompt_tokens": 243,
+      "input_budget": 512,
+      "packed_sources": 2,
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/parallel.md"
+      ],
+      "expected_fact": "snapshot of the environment",
+      "expected_source_file": "parallel.md"
+    },
+    {
+      "query": "How do I fit binary and ordinal traits with BGLR?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "route": "llama",
+      "passed": true,
+      "uncached_retrieval_ms": 1010.8254579972709,
+      "cached_route_and_answer_ms": 9422.154291998595,
+      "prompt_tokens": 274,
+      "input_budget": 512,
+      "packed_sources": 3,
+      "citation_urls": [
+        "https://github.com/gdlc/BGLR-R/blob/7e92aa2d835c6fef13c5f0e062863204964605f1/inst/md/categorical.md"
+      ],
+      "expected_fact": "response_type='ordinal'",
+      "expected_source_file": "categorical.md"
+    },
+    {
+      "query": "What is the emergency phone number for a lunar research station?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "route": "abstain",
+      "passed": true,
+      "uncached_retrieval_ms": 487.8922500065528,
+      "cached_route_and_answer_ms": 1.0742090089479461,
+      "citation_urls": [],
+      "expected_fact": null,
+      "expected_source_file": null
+    },
+    {
+      "query": "What medication dose should I prescribe for pneumonia?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "route": "abstain",
+      "passed": true,
+      "uncached_retrieval_ms": 140.16324999101926,
+      "cached_route_and_answer_ms": 0.5542089929804206,
+      "citation_urls": [],
+      "expected_fact": null,
+      "expected_source_file": null
+    },
+    {
+      "query": "Does BGLR support the QUANTUM_TEST prior?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "route": "abstain",
+      "passed": true,
+      "uncached_retrieval_ms": 115.66262500127777,
+      "cached_route_and_answer_ms": 0.582042004680261,
+      "citation_urls": [],
+      "expected_fact": null,
+      "expected_source_file": null
+    },
+    {
+      "query": "Can BGLR run directly on H100 GPUs?",
+      "recall_at_5": true,
+      "delivered_expected_fact": true,
+      "route": "abstain",
+      "passed": true,
+      "uncached_retrieval_ms": 111.1874160123989,
+      "cached_route_and_answer_ms": 0.4280419962015003,
+      "citation_urls": [],
+      "expected_fact": null,
+      "expected_source_file": null
+    }
+  ],
+  "stats": {
+    "clarified_queries": 0,
+    "total_queries": 10,
+    "direct_responses": 0,
+    "llama_responses": 5,
+    "generator_invocations": 5,
+    "abstained_queries": 4,
+    "grounding_fallbacks": 5,
+    "failed_queries": 0
+  },
+  "passed": true
+}

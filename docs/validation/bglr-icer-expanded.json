@@ -1,0 +1,11 @@
+{
+  "cases": 32,
+  "failures": [],
+  "unsupported_answers": 0,
+  "pass_rate": 1.0,
+  "recall_at_5": 1.0,
+  "p50_ms": 128.48004199622665,
+  "p95_ms": 266.3988329877611,
+  "llm_route_rate": 0.21875,
+  "embedded_passages": 0
+}

@@ -25,6 +25,7 @@ PACKAGE_MODULES = {
     "huggingface-hub": "huggingface_hub",
     "numpy": "numpy",
     "packaging": "packaging",
+    "markdown-it-py": "markdown_it",
     "requests": "requests",
     "sentence-transformers": "sentence_transformers",
     "sentencepiece": "sentencepiece",

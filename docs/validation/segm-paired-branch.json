@@ -1,0 +1,8 @@
+{
+  "repo": "/Users/rohanbanerjee/Projects/RAGpipe",
+  "samples": 160,
+  "startup_s": 0.15501483401749283,
+  "p50_ms": 48.39289601659402,
+  "p95_ms": 67.44133296888322,
+  "peak_rss_bytes": 499875840
+}

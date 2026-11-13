@@ -1,0 +1,21 @@
+{
+  "before": {
+    "repo": "/private/tmp/ragpipe-bglr-before",
+    "samples": 320,
+    "startup_s": 0.34056954200787004,
+    "p50_ms": 50.41497950151097,
+    "p95_ms": 83.4047499956796,
+    "peak_rss_bytes": 333561856
+  },
+  "after": {
+    "repo": "/Users/rohanbanerjee/Projects/RAGpipe",
+    "samples": 320,
+    "startup_s": 0.13444675000209827,
+    "p50_ms": 50.52122900815448,
+    "p95_ms": 72.79762500547804,
+    "peak_rss_bytes": 632258560
+  },
+  "p95_change": -0.1271765096202675,
+  "unchanged_corpus_sha256": "928ef4ce509a593565d7a9d32a1a51f85bd8115382c638caad84eb5417fcbbea",
+  "note": "Sequential 320-query CPU runs without generation; timing varies and this is not a speedup claim."
+}
