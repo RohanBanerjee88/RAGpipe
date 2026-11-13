@@ -726,7 +726,7 @@ class FAQRetriever:
             if multi:
                 return {"result": first, "route": "llama", "reason": "multiple_collections",
                         "context_faqs": list(tops.values())[:5], "multiple_collections": True}
-        
+
         if best_match["needs_llama"]:
             context = supported
             if best_match.get("literal_definition") and not multi:
