@@ -179,3 +179,24 @@ TREE_AUTO_UPDATE = True             # Auto-update tree after scraping
 
 # GPU/CPU configuration
 USE_GPU = True  # Set to False to force CPU usage
+
+# Private settings are read once at startup, never on the query path.
+DATA_DIRECTORY = PROJECT_ROOT / ".ragpipe"
+MODEL_PROFILES_PATH = PROJECT_ROOT / "model_profiles.toml"
+DEFAULT_GENERATION_PROFILE = None
+PRIVATE_MODEL_PROFILES = {}
+BI_ENCODER_REVISION = "main"
+CROSS_ENCODER_REVISION = "main"
+DEFAULT_COLLECTION = "auto"
+DEVICE_REQUEST = "auto"
+OFFLINE_MODE = False
+CHUNK_TOKENS = 64
+SAMPLE_ROWS = 5
+WEB_MAX_PAGES = 50
+WEB_TIMEOUT_SECONDS = 15
+WEB_MAX_BYTES = 5 * 1024 * 1024
+MAX_CONTEXT_TOKENS = 1536
+
+from private_config import read_private_config, validated_overrides
+
+globals().update(validated_overrides(read_private_config()))

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 import torch
+from config import DEVICE_REQUEST
 
 
 VALID_DEVICE_REQUESTS = {"auto", "cpu", "cuda"}
@@ -165,7 +166,7 @@ def _select_runtime_device(
 
 def select_runtime_device(use_gpu: bool = True, request: str | None = None) -> DeviceSelection:
     """Choose CPU or validated CUDA according to config and FAQ_DEVICE."""
-    requested_device = (request or os.getenv("FAQ_DEVICE", "auto")).strip().lower()
+    requested_device = (request or os.getenv("FAQ_DEVICE", DEVICE_REQUEST)).strip().lower()
     return _select_runtime_device(
         use_gpu,
         requested_device,

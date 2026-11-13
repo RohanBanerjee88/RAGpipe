@@ -28,6 +28,14 @@ class FakeResponse:
         self.headers = {"Content-Type": content_type}
         self.status_code = status
         self.ok = status < 400
+        self.encoding = "utf-8"
+
+    def iter_content(self, chunk_size):
+        for start in range(0, len(self.content), chunk_size):
+            yield self.content[start:start + chunk_size]
+
+    def close(self):
+        pass
 
     def raise_for_status(self):
         if not self.ok:
@@ -40,7 +48,7 @@ class FakeSession:
         self.headers = {}
         self.requested = []
 
-    def get(self, url, timeout):
+    def get(self, url, timeout, **kwargs):
         self.requested.append(url)
         value = self.pages[url]
         if isinstance(value, Exception):
@@ -99,6 +107,22 @@ class ImportTests(unittest.TestCase):
         self.assertNotIn("sample5", text)
         self.assertIn("Bounded sample only", text)
         self.assertNotIn("expression", text)
+
+    def test_changed_sample_setting_reimports_without_changing_the_source(self):
+        path = self.docs / "samples.csv"
+        path.write_text("id,x\nprivate-sample,42\n")
+        original = self.ingest()["records"][0]
+        with patch("knowledge_store.SAMPLE_ROWS", 0):
+            header = self.ingest()["records"][0]
+            self.assertEqual(header["version"], original["version"])
+            self.assertNotEqual(header["content_hash"], original["content_hash"])
+            self.assertNotIn("private-sample", header["text"])
+            self.assertIn("header only", header["location"])
+            self.assertEqual(header, self.ingest()["records"][0])
+        restored = self.ingest()["records"][0]
+        self.assertEqual(restored["version"], original["version"])
+        self.assertEqual(restored["content_hash"], original["content_hash"])
+        self.assertIn("private-sample", restored["text"])
 
     def test_workbook_formulas_are_never_evaluated(self):
         path = self.docs / "samples.xlsx"

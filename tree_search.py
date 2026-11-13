@@ -165,6 +165,8 @@ Response:"""
         
         response = generate_llama_response(prompt, confidence_level="high")
         
+        if not isinstance(response, str) or not response.strip():
+            return self._fallback_top_level_search(user_query)
         try:
             # Extract JSON
             start = response.find('{')
@@ -226,6 +228,8 @@ Response:"""
         
         response = generate_llama_response(prompt, confidence_level="high")
         
+        if not isinstance(response, str) or not response.strip():
+            return self._fallback_subnode_search(user_query, subnodes)
         try:
             start = response.find('{')
             end = response.rfind('}') + 1
@@ -274,6 +278,8 @@ Response:"""
         
         response = generate_llama_response(prompt, confidence_level="high")
         
+        if not isinstance(response, str) or not response.strip():
+            return self._fallback_filter_faqs(user_query, faqs, keep_top=keep_top)
         try:
             start = response.find('{')
             end = response.rfind('}') + 1

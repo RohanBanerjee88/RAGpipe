@@ -18,6 +18,9 @@ selection, named model profiles, and explicit offline operation. Lab documents
 and dataset descriptions can be searched alongside ICER without merging their
 keyword statistics or embedding caches.
 
+For day-to-day setup, private settings, imports, and validation, see the
+[Operational User Guide](docs/USAGE.md).
+
 ## How It Works
 
 ```text
@@ -80,8 +83,8 @@ module systems or shell profiles from injecting packages from another Python:
 ```bash
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
-python3.11 -m venv .venv-codex
-source .venv-codex/bin/activate
+python3.11 -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python scripts/check_environment.py
@@ -89,6 +92,10 @@ python scripts/check_environment.py
 
 The check must pass before scraping or running the assistant. Always use
 `python -m pip`, which guarantees that installation targets the active Python.
+This is the CPU environment. Keep an existing working environment intact; if it
+contains older packages or was created with another Python, create a separate
+Python 3.11 environment rather than mixing installs. For RefN review, check out
+`RefN` before running these commands; `main` does not contain this work yet.
 
 Prepare models once before the first search or import:
 
@@ -118,7 +125,7 @@ remote APIs, and models requiring custom executable code are not supported.
 Only one generator is loaded lazily per session. Restart to change it.
 
 Selection precedence is `--model`, `FAQ_LLM_MODEL`, the choice saved by `setup`,
-then the TOML default (`flan-base`). Hugging Face weights use its persistent cache
+private `models.default`, then the public TOML default (`flan-base`). Hugging Face weights use its persistent cache
 (`HF_HOME` can relocate it). Preparation records the resolved snapshot revision
 in `.ragpipe/prepared_models.json`. Missing generation weights allow source
 excerpts; missing retrieval weights require preparation before search.
@@ -309,10 +316,20 @@ conda activate ragpipe
 python scripts/check_environment.py --profile cuda126
 ```
 
-The Conda environment deliberately installs `torch==2.13.0+cu126`. A bare
-`torch==2.13.0` install on Linux currently resolves to CUDA 13.0, which does not
-include V100/Volta kernels. CUDA 12.6 supports V100, A100, and H100 with one
-environment.
+The Conda environment deliberately requests `torch==2.13.0+cu126` through
+`requirements-cuda126.txt`. Do not replace it with a bare Torch version or install
+the CPU requirements into this environment. The CUDA wheel must support the GPU
+architecture and the node's driver; the preflight below checks the actual
+allocation. These are pinned project requirements, not a claim to use the newest
+upstream release.
+
+If `ragpipe` already exists with an older stack, create a separate test environment:
+
+```bash
+conda env create -n ragpipe-refn -f environment.yml
+conda activate ragpipe-refn
+python scripts/check_environment.py --profile cuda126
+```
 
 After requesting a GPU node through the cluster scheduler, validate the actual
 allocation before starting the assistant:
@@ -401,6 +418,22 @@ The reference run produces:
 
 These are regression results for the included evaluation set, not a claim of
 perfect accuracy on arbitrary future questions or changed documentation.
+They also do not mean that raw FLAN generation always passes grounding checks:
+smoke tests may deliver a cited-excerpt fallback. Generation quality and correct
+source selection must be evaluated separately.
+
+For the tester's BGLR/software cases, prepare the public BGLR test store first:
+
+```bash
+FAQ_DEVICE=cpu python scripts/evaluate_bglr.py --data-dir /tmp/ragpipe-bglr-check --include-readme --procedures
+FAQ_DEVICE=cpu python scripts/evaluate_tester_feedback.py --data-dir /tmp/ragpipe-bglr-check --local-fixtures --output /tmp/tester-feedback.json
+```
+
+The second command checks the real public documents and derived local copies
+with synthetic hidden annotations, not the tester's private repository. Reimport
+existing external Markdown collections once after this parser update, then
+restart. The ICER corpus does not need refreshing. Model overview answers show
+the source's documentation catalog, not a guaranteed exhaustive model inventory.
 
 Useful manual questions include:
 
@@ -420,11 +453,17 @@ the matching FAQ evidence. The final three must abstain.
 
 ## Model Configuration
 
-The default generation model is configured in `config.py`:
+The default generation profile is configured in `model_profiles.toml`.
+For owner-only settings without editing shared files, run:
 
-```python
-LLAMA_MODEL = "google/flan-t5-base"
+```bash
+python -m private_config init
+python -m private_config path
+python -m private_config check
 ```
+
+See the [operational guide](docs/USAGE.md#private-configuration) for supported
+settings, private model profiles, precedence, and the OS-account privacy boundary.
 
 Override it without changing source code when testing a smaller model or when
 an approved larger model is available:

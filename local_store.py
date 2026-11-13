@@ -5,11 +5,11 @@ import os
 import tempfile
 from pathlib import Path
 
-from config import PROJECT_ROOT
+from config import DATA_DIRECTORY
 
 
 def data_root():
-    return Path(os.getenv("FAQ_DATA_DIR", PROJECT_ROOT / ".ragpipe")).expanduser().resolve()
+    return Path(os.getenv("FAQ_DATA_DIR", DATA_DIRECTORY)).expanduser().resolve()
 
 
 def read_json(path, default=None):
