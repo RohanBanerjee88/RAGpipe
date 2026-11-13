@@ -38,33 +38,41 @@ def build_evidence_blocks(context_faqs: Iterable[Dict], max_sources: int = 5) ->
 
 def validate_grounded_answer(answer: str, source_count: int, sources=None) -> Tuple[bool, str]:
     """Reject empty output, unknown sources, or factual sentences without citations."""
-    answer = (answer or "").strip()
-    if not answer:
+    answer = (answer or "").strip("\r\n")
+    if not answer.strip():
         return False, "empty_answer"
-    if answer == INSUFFICIENT_EVIDENCE:
+    if answer.strip() == INSUFFICIENT_EVIDENCE:
         return True, "abstained"
 
-    citations = [int(match) for match in CITATION_PATTERN.findall(answer)]
+    parser = MarkdownIt()
+    tokens = parser.parse(answer)
+    reference_lines = answer.splitlines(keepends=True)
+    for token in reversed(tokens):
+        if token.type in {"fence", "code_block"}:
+            start, end = token.map
+            reference_lines[start:end] = []
+    citations = [int(match) for match in CITATION_PATTERN.findall("".join(reference_lines))]
     if not citations:
         return False, "missing_citations"
     if not re.search(r"[A-Za-z0-9]", CITATION_PATTERN.sub("", answer)):
         return False, "empty_answer_content"
-    if any(citation < 1 or citation > source_count for citation in citations):
+    available = min(source_count, len(sources)) if sources is not None else source_count
+    if any(citation < 1 or citation > available for citation in citations):
         return False, "unknown_citation"
 
     # Code is supported as a complete, unchanged source block, not separate lines.
-    parser = MarkdownIt()
     lines = answer.splitlines(keepends=True)
     removals = []
     code_sources = set()
-    for token in parser.parse(answer):
-        if token.type != "fence":
+    for token in tokens:
+        if token.type not in {"fence", "code_block"}:
             continue
         start, end = token.map
-        closing = lines[end - 1].strip()
-        if end - start < 2 or not re.fullmatch(re.escape(token.markup[0]) +
-                                              "{" + str(len(token.markup)) + ",}", closing):
-            return False, "incomplete_code_block"
+        if token.type == "fence":
+            closing = lines[end - 1].strip()
+            if end - start < 2 or not re.fullmatch(re.escape(token.markup[0]) +
+                                                  "{" + str(len(token.markup)) + ",}", closing):
+                return False, "incomplete_code_block"
         following = "".join(lines[end:])
         citation = re.match(r"\s*((?:\[S\d+\]\s*)+)", following)
         if not citation:
@@ -72,11 +80,11 @@ def validate_grounded_answer(answer: str, source_count: int, sources=None) -> Tu
         references = [int(value) for value in CITATION_PATTERN.findall(citation[1])]
         code_sources.update(references)
         if sources is not None:
-            supported = {block.content.strip() for index in references
+            supported = {block.content.rstrip("\r\n") for index in references
                          for block in parser.parse(str(sources[index - 1].get(
                              "matched_answer", sources[index - 1].get("answer", ""))))
-                         if block.type == "fence"}
-            if token.content.strip() not in supported:
+                         if block.type in {"fence", "code_block"}}
+            if token.content.rstrip("\r\n") not in supported:
                 return False, "unverified_code_support"
         removals.append((start, end))
     for start, end in reversed(removals):
@@ -145,9 +153,10 @@ def extractive_grounded_answer(faq: Dict, reason: str = "generation_validation_f
     """Return source text when generation cannot be trusted."""
     answer = faq.get("matched_answer", faq.get("answer", ""))
     question = faq.get("matched_question", faq.get("question", ""))
+    separator = "\n\n" if any(token.type in {"fence", "code_block"} for token in MarkdownIt().parse(answer)) else " "
     return (
         f"Source excerpt:\n\n"
-        f"{answer} [S1]\n\n"
+        f"{answer}{separator}[S1]\n\n"
         f"Matched FAQ: {question}\n"
         f"Grounding fallback: {reason}"
     )
@@ -163,6 +172,6 @@ def evidence_excerpts(sources, reason="generation_unavailable"):
         if source.get("record_type", "faq") == "faq" and source.get("matched_question"):
             label += " | Matched FAQ: " + source["matched_question"]
         body = source.get("matched_answer", source.get("answer", ""))
-        separator = "\n\n" if any(token.type == "fence" for token in MarkdownIt().parse(body)) else " "
-        blocks.append(f"{label}:\n{body}{separator}[S{index}]")
+        separator = "\n\n" if any(token.type in {"fence", "code_block"} for token in MarkdownIt().parse(body)) else " "
+        blocks.append(f"{label}:\n\n{body}{separator}[S{index}]")
     return "\n\n".join(blocks) + f"\n\nSource excerpts ({reason}).\n\n" + format_sources(sources)

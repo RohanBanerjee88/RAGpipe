@@ -16,6 +16,7 @@ def search_query_text(query):
 def required_identifiers(query):
     identifiers = {match.group(0).lower() for match in re.finditer(
         r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b", query)}
+    identifiers.update(name.lower() for name in re.findall(r"\b([A-Za-z_][\w.:]*)\(", query))
     for code in re.findall(r"`([^`]+)`", query):
         # Backticks also format ordinary phrases, not just exact program names.
         if re.fullmatch(r"[A-Za-z_][\w.:-]*(?:\(\))?", code):

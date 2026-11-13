@@ -77,7 +77,19 @@ def web_sections(html, url):
             continue
         if element.find_parent(block_names):
             continue
-        text = " ".join(element.get_text(" ", strip=True).split())
+        if element.name == "pre":
+            for br in element.find_all("br"):
+                br.replace_with("\n")
+            code = element.get_text("", strip=False).strip("\n")
+            longest = max((len(match[0]) for match in re.finditer(r"`+", code)), default=0)
+            fence = "`" * max(3, longest + 1)
+            text = f"{fence}\n{code}\n{fence}" if code.strip() else ""
+            flush()
+            if text:
+                sections.append((heading, f"web section: {heading}", text, "passage"))
+            continue
+        else:
+            text = " ".join(element.get_text(" ", strip=True).split())
         if text and (not body or text != body[-1]):
             body.append(text)
     flush()
@@ -107,14 +119,54 @@ def crawl_website(start_url, max_pages=WEB_MAX_PAGES, session=None):
 
     def in_scope(path):
         return path == start.path or path.startswith(scope_root)
+
+    def fetch(url, robots_request=False):
+        visited = set()
+        for _ in range(6):
+            parsed = urlsplit(url)
+            if (parsed.netloc != start.netloc or (start.scheme == "https" and parsed.scheme != "https")
+                    or (not robots_request and not in_scope(parsed.path))):
+                raise ValueError("URL outside website scope")
+            if url in visited:
+                raise ValueError("redirect loop")
+            visited.add(url)
+            response = client.get(url, timeout=WEB_TIMEOUT_SECONDS, allow_redirects=False, stream=True)
+            try:
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("Location")
+                    if not location:
+                        raise ValueError("redirect without a Location header")
+                    target = normalize_web_url(urljoin(url, location))
+                    parsed = urlsplit(target)
+                    if (parsed.netloc != start.netloc or (start.scheme == "https" and parsed.scheme != "https")
+                            or (not robots_request and not in_scope(parsed.path))):
+                        raise ValueError("redirect outside website scope")
+                    url = target
+                    continue
+                response.raise_for_status()
+                size, chunks = 0, []
+                for chunk in response.iter_content(chunk_size=65536):
+                    size += len(chunk)
+                    if size > WEB_MAX_BYTES:
+                        raise ValueError(f"page exceeds {WEB_MAX_BYTES} bytes")
+                    chunks.append(chunk)
+                content = b"".join(chunks)
+                try:
+                    text = content.decode(response.encoding or "utf-8", errors="replace")
+                except LookupError:
+                    text = content.decode("utf-8", errors="replace")
+                return response, text
+            finally:
+                response.close()
+        raise ValueError("too many redirects")
     robots_url = urlunsplit((start.scheme, start.netloc, "/robots.txt", "", ""))
     robots = RobotFileParser()
     robots.set_url(robots_url)
     warnings = []
     try:
-        response = client.get(robots_url, timeout=WEB_TIMEOUT_SECONDS)
-        robots.parse(response.text.splitlines() if response.ok else [])
-    except requests.RequestException as exc:
+        response, text = fetch(robots_url, robots_request=True)
+        robots.parse(text.splitlines())
+    except (requests.RequestException, ValueError) as exc:
         robots.parse([])
         warnings.append(f"Could not read robots.txt: {exc}; continuing with the requested site")
 
@@ -123,6 +175,7 @@ def crawl_website(start_url, max_pages=WEB_MAX_PAGES, session=None):
     attempted = set()
     retained = set()
     pages = []
+    failed = False
     while queue and len(attempted) < max_pages:
         url = queue.popleft()
         attempted.add(url)
@@ -130,30 +183,29 @@ def crawl_website(start_url, max_pages=WEB_MAX_PAGES, session=None):
             warnings.append(f"Skipped {url}: blocked by robots.txt")
             continue
         try:
-            response = client.get(url, timeout=WEB_TIMEOUT_SECONDS)
-            response.raise_for_status()
+            response, text = fetch(url)
             final_url = normalize_web_url(response.url)
             final = urlsplit(final_url)
             if final.netloc != start.netloc or not in_scope(final.path):
                 warnings.append(f"Skipped redirected page outside website scope: {final_url}")
+                failed = True
                 continue
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
             if content_type not in {"text/html", "application/xhtml+xml"}:
                 warnings.append(f"Skipped {final_url}: unsupported content type {content_type or 'unknown'}")
+                failed = True
                 continue
-            if len(response.content) > WEB_MAX_BYTES:
-                warnings.append(f"Skipped {final_url}: page exceeds {WEB_MAX_BYTES} bytes")
-                continue
-            sections = web_sections(response.text, final_url)
+            sections = web_sections(text, final_url)
             if not sections:
                 warnings.append(f"Skipped {final_url}: no readable page content")
+                failed = True
                 continue
             extracted = "\n".join(f"{title}\n{text}" for title, _, text, _ in sections)
             pages.append((final_url, sha256_text(extracted), sections))
             retained.update({url, final_url})
 
             from bs4 import BeautifulSoup
-            soup = BeautifulSoup(response.text, "html.parser")
+            soup = BeautifulSoup(text, "html.parser")
             for anchor in soup.find_all("a", href=True):
                 try:
                     candidate = normalize_web_url(urljoin(final_url, anchor["href"]))
@@ -165,12 +217,15 @@ def crawl_website(start_url, max_pages=WEB_MAX_PAGES, session=None):
                         and suffix in {"", ".html", ".htm"} and candidate not in queued):
                     queue.append(candidate)
                     queued.add(candidate)
-        except requests.RequestException as exc:
+        except (requests.RequestException, ValueError) as exc:
             warnings.append(f"Skipped {url}: {exc}; previous records retained")
             retained.add(url)
-    complete = not queue
+            failed = True
+    complete = not queue and not failed
     if queue:
         warnings.append(f"Stopped after {max_pages} pages; increase --max-pages to crawl more")
+    if session is None:
+        client.close()
     return pages, retained, complete, warnings
 
 
@@ -187,10 +242,14 @@ def legacy_collection():
     ]}
 
 
-def list_collections(include_disabled=False):
-    collections = [legacy_collection()]
+def list_collections(include_disabled=False, name=None):
+    collections = [legacy_collection()] if name in {None, "icer"} else []
     root = data_root() / "collections"
-    for path in sorted(root.glob("*/manifest.json")):
+    paths = (sorted(root.glob("*/manifest.json")) if name is None else
+             [] if name == "icer" else [collection_path(name)])
+    for path in paths:
+        if not path.exists():
+            continue
         collection = read_json(path)
         if include_disabled or collection.get("enabled", True):
             collections.append(collection)
@@ -273,7 +332,8 @@ def markdown_sections(text, filename, blockwise=False):
             heading_titles[level] = title
             pending = None
         elif token.type in blocks:
-            body = "".join(lines[start:end]).strip()
+            body = ("".join(lines[start:end]).rstrip("\r\n") if token.type == "code_block"
+                    else "".join(lines[start:end]).strip())
             if token.type in {"paragraph_open", "bullet_list_open", "ordered_list_open"}:
                 meaningful = False
                 for inline in itertools.islice(tokens, index + 1, None):
@@ -436,7 +496,7 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
         now = utc_now_iso()
         from github_documents import github_target, github_documents
         github = website and github_target(source) is not None
-        parser_kind = "github-markdown-v5" if github else "web-sections-v2" if website else "sentence-chunks-v6"
+        parser_kind = "github-markdown-v6" if github else "web-sections-v3" if website else "sentence-chunks-v7"
         parser_id = f"{parser_kind}:{CHUNK_TOKENS}:{getattr(tokenizer, 'name_or_path', 'custom')}"
         if SAMPLE_ROWS != 5:
             parser_id += f":sample_rows={SAMPLE_ROWS}"
@@ -483,7 +543,7 @@ def import_collection(name, source, tokenizer=None, max_pages=WEB_MAX_PAGES, ses
                     new_records.append({
                         "source_id": source_id, "collection": name, "record_type": kind,
                         "title": title, "text": chunk, "question": title, "answer": chunk,
-                        "code_passage": bool(re.search(r"^\s*(`{3}|~{3})", text, re.M)),
+                        "code_passage": blocks[section_index]["code"],
                         "catalog": catalog,
                         "category": name, "section": title, "url": key,
                         "location": f"{location}, passage {chunk_index + 1}",

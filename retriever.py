@@ -102,7 +102,7 @@ class FAQRetriever:
         if self.debug:
             print(f"📂 Loading FAQs from {FAQ_JSON_PATH}...")
         
-        collections = list_collections()
+        collections = list_collections(name=None if self.collection == "auto" else self.collection)
         if self.collection != "auto":
             collections = [item for item in collections if item["name"] == self.collection]
             if not collections:
@@ -317,7 +317,7 @@ class FAQRetriever:
 
         started_at = time.perf_counter()
         user_query = normalize_text(user_query)
-        cache_key = user_query.lower()
+        cache_key = user_query
         cached_results = self._result_cache.get(cache_key)
         if cached_results is not None:
             self._result_cache.move_to_end(cache_key)
@@ -644,6 +644,12 @@ class FAQRetriever:
                 r.get("record_type") == "faq" and
                 re.sub(r"\W+", " ", r["matched_question"]).strip().lower() == canonical_query)]
         requested_models = {value for value in getattr(self, "model_values", ()) if value.lower() in terms}
+        if example_query(user_query) and any(re.search(
+                r"\b(?:not|except|excluding|other than)\s+(?:using\s+)?(?:an?\s+)?" + re.escape(value) + r"\b",
+                user_query, re.I) for value in requested_models):
+            return {"result": best_match, "route": "clarify", "reason": "excluded_model_constraint",
+                    "context_faqs": [], "clarification_message":
+                    "You excluded a model. Which model should I use instead? I have not selected an excluded example."}
         if example_query(user_query) and requested_models:
             def implements_requested_model(result):
                 return requested_models.issubset(model_values(evidence_text(result)))
@@ -656,9 +662,7 @@ class FAQRetriever:
         options = required_option_values(user_query)
         if required or options:
             # Never borrow an identifier from an unrelated or unsupported result.
-            matching = [r for r in supported if
-                         (r is best_match and r.get("record_type") == "faq")
-                         or has_identifiers(r, required, options)]
+            matching = [r for r in supported if has_identifiers(r, required, options)]
             if not matching and getattr(self, "context_sources", None):
                 from evidence_context import reconstruct_context
                 expanded = reconstruct_context(user_query, supported, self.context_sources, self.bi_encoder.tokenizer)
@@ -672,7 +676,10 @@ class FAQRetriever:
         named = {name for name in {r["collection"] for r in results} if re.search(
             r"(?<!\w)" + re.escape(name) + r"(?!\w)", user_query, re.I)}
         multi = bool(re.search(r"\b(compare|both|across|versus)\b", user_query, re.I))
-        if len(named) == 1 and not multi:
+        cross_collection = bool(re.search(
+            r"\b(?:both|all|other|multiple|several)\s+(?:the\s+)?(?:labs?|collections?|sources?)\b|"
+            r"\bacross\s+(?:labs?|collections?|sources?)\b", user_query, re.I))
+        if len(named) == 1 and not cross_collection:
             supported = [r for r in supported if r["collection"] in named]
         recovered = bool(supported) and supported[0] is not best_match
         if not supported:

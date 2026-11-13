@@ -4,6 +4,7 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from filelock import FileLock
 
 from config import (
     BI_ENCODER_MODEL, CROSS_ENCODER_MODEL, BI_ENCODER_REVISION, CROSS_ENCODER_REVISION,
@@ -54,8 +55,6 @@ def configure_session(selection=None, offline=False):
     global _active, _offline
     _active = resolve_profile(selection)
     _offline = offline or os.getenv("HF_HUB_OFFLINE", "1" if OFFLINE_MODE else "0") == "1"
-    if _offline:
-        os.environ["HF_HUB_OFFLINE"] = "1"
     return _active
 
 
@@ -96,8 +95,12 @@ def model_location(model, revision="main", download=False):
         ignore_patterns=["*.h5", "*.msgpack", "*.onnx", "*.tflite", "*.ot", "*.gguf"],
     )
     if download:
-        prepared[key] = Path(path).name
-        write_json(data_root() / "prepared_models.json", prepared)
+        manifest = data_root() / "prepared_models.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        with FileLock(str(manifest) + ".lock"):
+            prepared = read_json(manifest)
+            prepared[key] = Path(path).name
+            write_json(manifest, prepared)
     return path
 
 

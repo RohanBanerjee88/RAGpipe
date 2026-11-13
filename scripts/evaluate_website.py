@@ -21,6 +21,15 @@ class Response:
         self.content = text.encode()
         self.headers = {"Content-Type": content_type}
         self.ok = True
+        self.status_code = 200
+        self.encoding = "utf-8"
+
+    def iter_content(self, chunk_size):
+        for start in range(0, len(self.content), chunk_size):
+            yield self.content[start:start + chunk_size]
+
+    def close(self):
+        pass
 
     def raise_for_status(self):
         return None
@@ -42,7 +51,7 @@ class Website:
                 </article></body></html>"""),
         }
 
-    def get(self, url, timeout):
+    def get(self, url, timeout, **kwargs):
         return self.pages[url]
 
 

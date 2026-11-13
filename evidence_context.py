@@ -27,7 +27,7 @@ def context_blocks(sections, raw_text=None):
         section = max((line for line in headings if span and line <= int(span[1])), default=0)
         result.append({"title": title, "location": location, "text": text,
                        "group": section if raw_text is not None else group,
-                       "code": bool(re.search(r"^\s*(`{3}|~{3})", text, re.M)),
+                       "code": any(token.type in {"fence", "code_block"} for token in MarkdownIt().parse(text)),
                        "record_type": kind})
         lines = text.splitlines()
         result[-1]["complete_code"] = all(
