@@ -13,13 +13,17 @@ gated model repository.
 The invocation rate depends on the collection: FAQ-heavy workloads often avoid
 generation, while document questions more often need excerpts or synthesis.
 
-The `segM` extension adds independent lab collections, automatic collection
-selection, named model profiles, and explicit offline operation. Lab documents
-and dataset descriptions can be searched alongside ICER without merging their
-keyword statistics or embedding caches.
+Independent lab collections, automatic collection selection, named model
+profiles, private settings, and explicit offline operation are available on
+`main`. Lab documents and dataset descriptions can be searched alongside ICER
+without merging their keyword statistics or embedding caches. There is no need
+to check out the former `segM` or `RefN` branches to use these features.
 
 For day-to-day setup, private settings, imports, and validation, see the
 [Operational User Guide](docs/USAGE.md).
+Already running the assistant? Start with
+[Updating an Existing Installation](#updating-an-existing-installation), not the
+fresh environment setup.
 
 ## How It Works
 
@@ -68,12 +72,82 @@ A100, and H100 GPU generations. Python 3.11 is the tested version. Run
 `scripts/check_environment.py` after installation to catch version drift or
 packages imported from a system Python.
 
+## Updating an Existing Installation
+
+Stop the assistant and any imports, then activate the same working Python
+environment and enter your existing checkout. Keep your current `FAQ_CONFIG`,
+`FAQ_DATA_DIR`, `FAQ_MODELS_CONFIG`, and Hugging Face cache settings. Do not
+reclone, recreate a working environment, run `config init`/`setup`, delete
+caches, or rescrape ICER for this update. Run the steps in order and stop at any
+command error.
+
+**First complete the [backup step in the operational guide](docs/USAGE.md#back-up-first).**
+It copies the active private configuration, data store (including saved model
+selection), and ICER JSON, including custom paths. Run `git status --short`
+separately; if it shows local changes, preserve them before switching branches.
+Never use a hard reset or `git clean` to make the checkout ready.
+
+With a clean checkout and a completed backup:
+
+```bash
+git fetch origin
+git switch main
+git pull --ff-only origin main
+python -m private_config check
+python main.py collections list
+```
+
+If your existing collections are missing, stop and check the selected config and
+data directory before importing anything. On CPU, run
+`python scripts/check_environment.py`. On HPCC, use
+`python scripts/check_environment.py --profile cuda126` instead, then run
+`python scripts/check_gpu.py --require-cuda` on an allocated GPU node. Do not
+install `requirements.txt` into a working CUDA environment. A passing check does
+not require reinstalling packages or downloading models again.
+
+Reimport the affected external collections once to rebuild parser/context
+metadata. These BGLR commands assume the original imports used the same URLs;
+replace the Atlas placeholder with its **original absolute documentation path**.
+If BGLR was imported locally or from another revision, reuse that original
+source instead of adding a different copy.
+
+```bash
+python main.py collections import bglr https://github.com/gdlc/BGLR-R/tree/master/inst/md --max-pages 50
+python main.py collections import bglr https://github.com/gdlc/BGLR-R/blob/master/README.md
+python main.py collections import atlas "/absolute/path/to/your/existing/atlas-docs" --quiet
+python main.py collections list
+```
+
+Review warnings; rerun without `--quiet` for details. Imports update only the
+named collection, but a successful refresh can remove records for files deleted
+from its original source. Compatible unchanged embeddings are reused; parser
+changes can alter passage counts. The private config and ICER FAQ file are not
+replaced by these imports.
+
+Run the [isolated checks](docs/USAGE.md#run-the-checks), then start fresh sessions
+to test your own documents. Type `quit` before starting the next session:
+
+```bash
+python main.py --offline --collection bglr --model retrieval-only
+python main.py --offline --collection atlas --model retrieval-only
+python main.py --offline --collection auto
+```
+
+The last command honors your existing generator selection; it does not save a
+new choice. Use the [manual checklist](docs/USAGE.md#test-your-own-collections)
+to compare definitions, code examples, clarification, and abstention with the
+actual cited sources. Keep the backup until these checks pass.
+
 ## Quick Start
+
+This section is for a **new CPU installation on `main`**. Existing installations
+should use the update steps above. For a new HPCC environment, use the
+[Conda/CUDA instructions](#hpcc--conda-setup) instead of the CPU install commands.
 
 Clone the repository and enter it:
 
 ```bash
-git clone https://github.com/RohanBanerjee88/RAGpipe.git
+git clone --branch main https://github.com/RohanBanerjee88/RAGpipe.git
 cd RAGpipe
 ```
 
@@ -94,8 +168,8 @@ The check must pass before scraping or running the assistant. Always use
 `python -m pip`, which guarantees that installation targets the active Python.
 This is the CPU environment. Keep an existing working environment intact; if it
 contains older packages or was created with another Python, create a separate
-Python 3.11 environment rather than mixing installs. For RefN review, check out
-`RefN` before running these commands; `main` does not contain this work yet.
+Python 3.11 environment rather than mixing installs. All collection and private
+configuration features described here are included in `main`.
 
 Prepare models once before the first search or import:
 
@@ -109,6 +183,10 @@ python main.py models prepare flan-base
 Preparation downloads missing weights; ordinary startup uses cached files only.
 For an environment without a generator, use `models prepare retrieval-only`.
 Scraping requires network access, but does not require inference models.
+Before starting a fresh assistant, import your documents using the sections
+below. If you want ICER and do not already have its configured FAQ JSON, run
+`python scrape.py` once. Existing installations should keep their current corpus;
+lab-only installations do not need to scrape ICER.
 
 ### Model Profiles and Offline Use
 
@@ -219,7 +297,7 @@ python -m unittest discover -s tests -q
 The first run downloads public documents, not model weights. Subsequent
 `--skip-import` runs are offline with prepared models. These BGLR questions are
 development smoke tests, not a held-out accuracy benchmark. Read
-[the existing pull request](https://github.com/RohanBanerjee88/RAGpipe/pull/7) for results and limitations.
+[the merged collection PR](https://github.com/RohanBanerjee88/RAGpipe/pull/7) for results and limitations.
 
 Tables create descriptions from filenames, sheets, column headers, and at most
 five sample rows. Formula cells are labeled without execution. Samples are not
@@ -264,7 +342,11 @@ FAQ_DEVICE=cpu python scripts/evaluate_segm.py --growth --output /tmp/segm-growt
 FAQ_DEVICE=cpu python scripts/evaluate_models.py --output /tmp/segm-models.json
 ```
 
-Both scripts use cached models offline. The collection evaluator creates isolated
+The retrieval/fixture checks use cached models offline; the model comparison
+requires its selected generators to have been prepared too. For the full
+post-update sequence, including BGLR and tester-feedback checks in an isolated
+store, use the [operational checklist](docs/USAGE.md#run-the-checks).
+The collection evaluator creates isolated
 synthetic lab fixtures and checks the original ICER questions with up to 10,000
 additional passages across ten collections. It records timing, peak memory,
 incremental embedding counts, cache latency, routing, and retrieval accuracy.
@@ -305,8 +387,10 @@ fallback. Raw generation success and delivered excerpt quality are reported sepa
 
 ### HPCC / Conda Setup
 
-On an HPCC module system, create the dedicated Conda environment described by
-`environment.yml`. Do not install this project into the base environment:
+For a new HPCC installation on `main`, create the dedicated Conda environment
+described by `environment.yml`. Existing installations should first use the
+[update checklist](#updating-an-existing-installation) and keep a working
+environment. Do not install this project into the base environment:
 
 ```bash
 module purge
@@ -323,35 +407,32 @@ architecture and the node's driver; the preflight below checks the actual
 allocation. These are pinned project requirements, not a claim to use the newest
 upstream release.
 
-If `ragpipe` already exists with an older stack, create a separate test environment:
+Only if the existing environment fails the version check, create a separate test
+environment rather than changing the working one. Choose an unused name:
 
 ```bash
-conda env create -n ragpipe-refn -f environment.yml
-conda activate ragpipe-refn
+conda env create -n ragpipe-test -f environment.yml
+conda activate ragpipe-test
 python scripts/check_environment.py --profile cuda126
 ```
+
+An already-working environment named `ragpipe-refn` can keep that name and run
+`main`; the environment name is not a branch requirement.
 
 After requesting a GPU node through the cluster scheduler, validate the actual
 allocation before starting the assistant:
 
 ```bash
 python scripts/check_gpu.py --require-cuda
-FAQ_DEVICE=cuda FAQ_LLM_MODEL=google/flan-t5-base python main.py
+FAQ_DEVICE=cuda python main.py --offline --collection auto
 ```
 
-`--require-cuda` makes setup errors fail immediately. Without it, the application
-uses `FAQ_DEVICE=auto` and can fall back to CPU with a warning.
-
-To update an existing project environment after dependency changes:
-
-```bash
-module purge
-module load Miniforge3
-conda env update -n ragpipe -f environment.yml --prune
-conda activate ragpipe
-python scripts/check_environment.py --profile cuda126
-python scripts/check_gpu.py --require-cuda
-```
+`--require-cuda` makes setup errors fail immediately. `FAQ_DEVICE=cuda` requires
+a working GPU; `FAQ_DEVICE=auto` can fall back to CPU with a warning. Startup
+without a `--model` override honors the existing generator selection. Prepare
+retrieval weights once before the first search; a routine source update does
+not require preparing them again when the cache is intact. Do not prune or
+recreate a passing environment merely because the Git branch changed.
 
 Do not load a site CUDA toolkit module for the prebuilt PyTorch wheel. The wheel
 contains its CUDA runtime and only needs a compatible NVIDIA driver. Start from
@@ -359,7 +440,8 @@ contains its CUDA runtime and only needs a compatible NVIDIA driver. Start from
 allocation problem. A CUDA module is only needed when compiling PyTorch or a
 custom CUDA extension from source.
 
-Build the local corpus and deterministic FAQ tree:
+Only for a fresh installation that needs ICER and does not already have its
+configured FAQ JSON, build the corpus and optional FAQ tree once:
 
 ```bash
 python scrape.py
@@ -369,9 +451,9 @@ Generated paths are resolved from the repository itself, so the bootstrap does
 not depend on the shell's current directory. Running from the repository root is
 still recommended because the remaining commands and examples assume it.
 
-This step is required on a fresh clone. Generated corpus files are intentionally
-not committed because they are refreshable build artifacts. A successful scrape
-creates:
+Existing installations should reuse their ICER corpus; lab-only installations
+can skip this step. Generated corpus files are intentionally not committed
+because they are refreshable build artifacts. A successful scrape creates:
 
 - `all_faqs.json`: normalized and versioned FAQ records
 - `faq_tree.json`: optional hierarchical FAQ index
@@ -399,22 +481,27 @@ FAQ_LLM_MODEL=google/flan-t5-base python scripts/test_small_llm.py
 Finally, start the interactive assistant:
 
 ```bash
-FAQ_LLM_MODEL=google/flan-t5-base python main.py
+python main.py --offline --collection auto
 ```
 
 Use `stats` to inspect session routing and `quit` to exit cleanly.
 
 ## Expected Test Results
 
-The reference run produces:
+The November 13, 2026 local CPU merge-validation run passed:
 
-- Focused unit tests passing, including GPU, model setup, ingestion, and fallback coverage
-- 32/32 labeled exact, paraphrased, unsupported, and adversarial cases passing
-- 100% route accuracy on the checked evaluation set
-- 100% supported Recall@5 on the checked evaluation set
-- 100% abstention precision and recall on the checked evaluation set
-- zero failures in retriever, optional tree, and assistant diagnostics
-- zero failures with `google/flan-t5-base` on the real slow-path smoke test
+- 175 unit tests, including mocked GPU, model setup, ingestion, and fallback checks
+- 32/32 ICER cases with unrelated lab collections enabled
+- 15/15 refined-routing cases, 5/5 lab development cases, and 21/21 lab regressions
+- ICER and lab regressions with both 1,000 and 10,000 unrelated passages added
+- 11/11 public BGLR checks and 11/11 tester-feedback checks
+- Both website retrieval cases and offline/setup/cached-restart/missing-model smoke checks
+
+The lab/method/site fixtures are mock data; annotated BGLR copies are synthetic,
+not the tester's private Atlas repository. Public BGLR validation used snapshot
+`7e92aa2d835c6fef13c5f0e062863204964605f1`; newer `master` imports can change the
+source material. GPU hardware and raw generator quality were not validated by
+this CPU merge run. Use the optional generator checks separately.
 
 These are regression results for the included evaluation set, not a claim of
 perfect accuracy on arbitrary future questions or changed documentation.
