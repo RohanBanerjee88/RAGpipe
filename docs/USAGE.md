@@ -5,6 +5,7 @@ return complete FAQ answers, cited document excerpts, or grounded model output;
 it abstains when the sources do not support the question. Run the commands below
 from the repository root with the project's Python environment active.
 
+- [Update an existing installation](#update-an-existing-installation)
 - [Fresh CPU setup](#fresh-cpu-setup)
 - [Private configuration](#private-configuration)
 - [Models and offline operation](#models-and-offline-operation)
@@ -12,6 +13,234 @@ from the repository root with the project's Python environment active.
 - [Ask questions and read answers](#ask-questions-and-read-answers)
 - [Validation and evaluation](#validation-and-evaluation)
 - [Routine changes and troubleshooting](#routine-changes-and-troubleshooting)
+
+## Update an Existing Installation
+
+All collection, model-profile, and private-settings features are now on `main`.
+Use this section for an existing collection installation, including one previously
+run from `RefN` or `segM`. Do not follow the fresh-clone instructions again.
+Run each step in order and stop at an error rather than continuing with imports.
+
+### Back Up First
+
+Stop every assistant session and any import/preparation jobs using this store.
+Enter your existing repository and activate its working Python environment, for
+example `conda activate ragpipe-refn` or `source .venv/bin/activate`, as appropriate
+for your installation. Keep that environment name; it does not require checking
+out a similarly named branch. Keep the same `FAQ_CONFIG`, `XDG_CONFIG_HOME`,
+`FAQ_DATA_DIR`, `FAQ_MODELS_CONFIG`, and Hugging Face cache exports.
+
+Check for local edits before changing branches:
+
+```bash
+git status --short
+```
+
+If anything is listed, stop and preserve/review those changes first. In
+particular, do not discard local edits to `config.py` or model profiles. Do not
+use a hard reset, `git clean`, or delete ignored files to prepare for the update.
+Ignored corpora and stores are not shown by this command, so back them up too.
+
+The following block validates the current private config and copies the active
+config, full data store (including saved model selection and prepared-model
+pins), and ICER JSON. It resolves custom paths instead of assuming `.ragpipe/`
+or a particular home directory. Keep enough free disk space for a second copy
+of the store. The subshell stops on failure without changing your shell options.
+
+```bash
+(
+    set -eu
+    umask 077
+    CFG="${FAQ_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/ragpipe/config.toml}"
+    if [ -f private_config.py ]; then
+        python -m private_config check
+        CFG="$(python -m private_config path)"
+    fi
+    STORE="$(python -c 'from local_store import data_root; print(data_root())')"
+    FAQ="$(python -c 'from config import FAQ_JSON_PATH; print(FAQ_JSON_PATH)')"
+    BACKUP="$(mktemp -d "$HOME/ragpipe-backup.XXXXXX")"
+    BACKUP="$(cd "$BACKUP" && pwd -P)"
+    case "$BACKUP/" in
+        "${STORE%/}/"*)
+            printf '%s\n' "Choose a backup location outside the active data directory." >&2
+            exit 1
+            ;;
+    esac
+    [ ! -f "$CFG" ] || cp -p "$CFG" "$BACKUP/config.toml"
+    [ ! -d "$STORE" ] || cp -pR "$STORE" "$BACKUP/store"
+    [ ! -f "$FAQ" ] || cp -p "$FAQ" "$BACKUP/all_faqs.json"
+    printf 'Config: %s\nStore: %s\nICER JSON: %s\nBackup: %s\n' "$CFG" "$STORE" "$FAQ" "$BACKUP"
+)
+```
+
+Record the printed locations and keep the backup until testing is complete.
+No private config is created if you did not already use one. Source documents,
+custom profile files, and Hugging Face weights are not copied by this block;
+the update/reimport commands below do not modify those originals. Keep any
+separate document backups required by your lab. If restoration is needed, stop
+the assistant and restore to the original paths. Do not select the backup config
+as a new `FAQ_CONFIG`: relative settings resolve beside the config file.
+On an older `segM` checkout without `private_config.py`, the block copies the
+explicit/default config path if present; validation happens after updating to
+`main`. Use an absolute path for `FAQ_CONFIG` as documented below.
+
+### Update to Main
+
+With the backup complete, update the existing checkout without rewriting history:
+
+```bash
+(
+    set -eu
+    if [ -n "$(git status --porcelain)" ]; then
+        printf '%s\n' "Preserve local edits before updating." >&2
+        exit 1
+    fi
+    git fetch origin
+    git switch main
+    git pull --ff-only origin main
+    python -m private_config check
+    python -c 'from local_store import data_root; print("Active store:", data_root())'
+    python main.py collections list
+)
+```
+
+The active store should match the backup's printed source path. If `bglr`,
+`atlas`, or other expected collections are missing, stop and check config and
+environment selection before importing. Changing the data directory selects a
+different store; it does not migrate the existing one. If a fast-forward fails,
+inspect the branch history instead of forcing an update.
+
+Keep the working environment when its check passes. For a CPU environment:
+
+```bash
+python scripts/check_environment.py
+```
+
+For the existing HPCC CUDA environment, use these checks instead, with the GPU
+preflight run on an allocated GPU node, not a login node:
+
+```bash
+python scripts/check_environment.py --profile cuda126
+python scripts/check_gpu.py --require-cuda
+```
+
+Do not install CPU `requirements.txt` into the CUDA environment or prune/recreate
+a working Conda environment as a routine update step. If dependencies really
+fail validation, use the [environment instructions](../README.md#hpcc--conda-setup)
+to create a separate Python 3.11 environment. Do not run `config init`, `setup`,
+or `scrape.py` merely to update: these are not upgrade steps, and `setup` changes
+the saved generator selection. Missing weights need explicit preparation under
+[Models and Offline Operation](#models-and-offline-operation), not cache deletion.
+
+### Reimport BGLR and Atlas
+
+Reimport affected external Markdown/GitHub/website collections once to apply the
+current parser and procedure-context metadata. Use the same collection names
+and original source paths/URLs. These BGLR commands assume the original imports
+used the same `master` URLs; if yours were local or pinned to another revision,
+reuse those sources instead. The README import adds the package overview, which
+is not part of the `inst/md` examples subtree.
+
+Replace the Atlas placeholder with the original absolute documentation directory:
+
+```bash
+python main.py collections import bglr https://github.com/gdlc/BGLR-R/tree/master/inst/md --max-pages 50
+python main.py collections import bglr https://github.com/gdlc/BGLR-R/blob/master/README.md
+python main.py collections import atlas "/absolute/path/to/your/existing/atlas-docs" --quiet
+python main.py collections list
+```
+
+GitHub imports need internet access even if model loading is offline. Stop on an
+import error. Review warnings and rerun without `--quiet` when details are needed;
+the quiet flag only summarizes warnings, not failures. A capped GitHub import
+needs a deliberately larger `--max-pages` to include the remaining files.
+
+Reimporting updates the named collection, not ICER or private settings. It can
+change passage counts, rebuild changed/incompatible vectors, and remove records
+for files deleted from the original directory or a successfully refreshed web
+scope. Failed/partial fetches retain previous affected records. Compatible
+unchanged passage embeddings are reused, and original documents are not edited.
+Do not use a different directory copy as a shortcut: its source paths differ.
+Restart all assistant sessions after imports; they do not reload in-memory data.
+
+### Run the Checks
+
+Run this block in the same checkout with retrieval weights already cached. It
+creates a new private temporary directory for reports and the public BGLR test
+store; it does not add mock data to the operational collections. The first BGLR
+evaluation downloads public documents. The remaining fixture checks use cached
+models offline. These are CPU checks even when your normal assistant uses CUDA;
+the per-command `FAQ_DEVICE=cpu` does not change your config or shell defaults.
+
+The complete suite needs the existing ICER FAQ JSON. If you intentionally do not
+have ICER data, omit the collection and tester-feedback evaluators or provide a
+trusted snapshot; do not rescrape just to perform an application update.
+
+```bash
+(
+    set -eu
+    umask 077
+    CHECKS="$(mktemp -d "${TMPDIR:-/tmp}/ragpipe-check.XXXXXX")"
+    printf 'Test reports: %s\n' "$CHECKS"
+    FAQ_DEVICE=cpu python -m unittest discover -s tests -q
+    FAQ_DEVICE=cpu python scripts/evaluate_refn.py --output "$CHECKS/refn.json"
+    FAQ_DEVICE=cpu python scripts/evaluate_segm.py --split all --growth --output "$CHECKS/collections.json"
+    FAQ_DEVICE=cpu python scripts/evaluate_website.py
+    FAQ_DEVICE=cpu python scripts/smoke_setup.py
+    FAQ_DEVICE=cpu python scripts/evaluate_bglr.py --data-dir "$CHECKS/bglr-store" --include-readme --procedures --output "$CHECKS/bglr.json"
+    FAQ_DEVICE=cpu python scripts/evaluate_tester_feedback.py --data-dir "$CHECKS/bglr-store" --local-fixtures --output "$CHECKS/feedback.json"
+)
+```
+
+The script names `evaluate_refn.py` and `evaluate_segm.py` identify regression
+suites, not branches you need to check out. Run them from `main`. The growth
+exercise adds 1,000 then 10,000 unrelated passages in an isolated store; allow
+extra time and disk space. Temporary reports may be cleared by the operating
+system; move reports you need to an appropriately protected location, not Git.
+
+The November 13, 2026 local CPU reference passed 175 unit tests, 15/15 RefN
+cases, 32/32 ICER cases, 5/5 lab development cases, 21/21 lab regressions, 11/11
+BGLR cases, 11/11 tester-feedback cases, both website cases, and startup smoke
+checks. ICER and lab regressions also passed both growth sizes. BGLR validation
+used public snapshot `7e92aa2d835c6fef13c5f0e062863204964605f1`; a new import
+from `master` can resolve to newer documents, so inspect the reported revision.
+
+The lab/method/site fixtures are mock data. Annotated-local-document checks use
+synthetic annotations, not the tester's private Atlas repository. These cases
+are development regressions, not untouched held-out evaluations. Changed source
+material or private retrieval settings can affect results; inspect failures and
+source evidence rather than lowering thresholds. This suite does not validate
+HPCC hardware, execute R examples, or establish raw generator quality. Optional
+real-generator comparisons are under [Validation and Evaluation](#validation-and-evaluation).
+
+### Test Your Own Collections
+
+Automated fixture checks are not a substitute for checking your real Atlas
+documents. Run these sessions separately, typing `quit` before the next one:
+
+```bash
+python main.py --offline --collection bglr --model retrieval-only
+python main.py --offline --collection atlas --model retrieval-only
+python main.py --offline --collection auto
+```
+
+The first two isolate retrieval and source excerpts. The last honors the
+existing saved/environment/private generator selection and checks automatic
+collection selection; it does not save a new model choice. A missing generator
+can fall back to cited excerpts, which is not a successful generation test.
+
+| Question | What to check |
+| --- | --- |
+| `What is BGLR?` | Package definition supported by the README, not a project blurb or random code mention. |
+| `Give me an example of an RKHS model` | An actual RKHS implementation with complete code/setup, not a passage saying "except RKHS". |
+| `Give me an example of an RHKS model implemented in BGLR` | Clarification of the likely transposition, not a silent switch to FIXED. |
+| `Does BGLR support the QUANTUM_TEST prior?` | Abstention when the sources contain no supporting evidence. |
+| `Where can I find what software is on HPCC` (automatic mode) | Relevant software/module documentation, not a network-IP FAQ. |
+
+For Atlas, ask several facts and one procedure you can locate in the original
+documents, plus a question whose answer is absent. Compare collection, source,
+location, complete code, and factual support. A citation label alone is not proof
+that an answer addresses the question. Keep the backup until these checks pass.
 
 ## Fresh CPU Setup
 
@@ -23,14 +252,13 @@ the separate HPCC CUDA/Conda profile, follow the
 For a new checkout:
 
 ```bash
-git clone https://github.com/RohanBanerjee88/RAGpipe.git
+git clone --branch main https://github.com/RohanBanerjee88/RAGpipe.git
 cd RAGpipe
-# Check out the review/release branch containing this guide before continuing.
 ```
 
-During this phase, use a `RefN` review checkout, based on `segM`. A default
-`main` checkout does not include these changes yet. Existing review checkouts
-can skip cloning. RefN's integration target is `segM`, not `main`.
+`main` includes all features described in this guide. If you already have a
+working checkout, use [Update an Existing Installation](#update-an-existing-installation)
+instead of cloning or running fresh setup again.
 
 Create an isolated CPU environment. Do not delete an existing working environment
 or corpus to follow these steps; choose another environment name if necessary.
